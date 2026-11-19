@@ -39,17 +39,112 @@ async function tgFaylEndir(token, fileId) {
   };
 }
 
-async function tgMesajGonder(token, chatId, metn) {
+const crypto = require("node:crypto");
+
+const tgDetalliYaddas = new Map();
+setInterval(() => {
+  const indi = Date.now();
+  for (const [k, v] of tgDetalliYaddas.entries()) {
+    if (indi - v.vaxt > 2 * 60 * 60 * 1000) tgDetalliYaddas.delete(k);
+  }
+}, 30 * 60 * 1000);
+
+function telegramCavabiFormatla(xamMetn, sitatlar = []) {
+  if (!xamMetn) return { qisa: "", genis: null, suallar: [] };
+
+  let metn = String(xamMetn);
+
+  // 1. Detallı Analiz blokunu çıxar
+  let genisMetn = "";
+  const detalMatch = metn.match(/<DETALLI_ANALIZ>([\s\S]*?)<\/DETALLI_ANALIZ>/i);
+  if (detalMatch) {
+    genisMetn = detalMatch[1].trim();
+    metn = metn.replace(/<DETALLI_ANALIZ>[\s\S]*?<\/DETALLI_ANALIZ>/i, "").trim();
+  }
+
+  // 2. Növbəti Suallar blokunu çıxar
+  const novbetiSuallar = [];
+  const sualMatch = metn.match(/<NOVBETI_SUALLAR>([\s\S]*?)<\/NOVBETI_SUALLAR>/i);
+  if (sualMatch) {
+    const lines = sualMatch[1].split("\n");
+    lines.forEach(l => {
+      const t = l.replace(/^[-*•\d.)\s]+/, "").trim();
+      if (t && t.length > 5) novbetiSuallar.push(t);
+    });
+    metn = metn.replace(/<NOVBETI_SUALLAR>[\s\S]*?<\/NOVBETI_SUALLAR>/i, "").trim();
+  }
+
+  // 3. Yaddaş və qalıq teqləri təmizlə
+  metn = metn.replace(/<YADDAŞ(?:\s+[^>]+)?>[\s\S]*?<\/YADDAŞ>/gi, "").trim();
+  genisMetn = genisMetn.replace(/<YADDAŞ(?:\s+[^>]+)?>[\s\S]*?<\/YADDAŞ>/gi, "").trim();
+
+  // 4. Telegram üçün təmizləyici funksiya
+  const formatla = (str) => {
+    return str
+      .replace(/^###\s*📌?\s*Konkret və Qısa Cavab:?/im, "📌 <b>Konkret Cavab:</b>")
+      .replace(/^###\s*🔍?\s*Geniş Təhlil[^\n]*/im, "🔍 <b>Geniş Hüquqi Təhlil və Şərtlər:</b>")
+      .replace(/^#{1,4}\s*(.+)$/gm, (_, t) => "\n<b>" + t.trim() + "</b>")
+      .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+      .replace(/^[-*]\s+/gm, "• ")
+      .replace(/<(?!\/?(?:b|strong|i|em|code|pre|a)\b)[^>]+>/gi, "")
+      .replace(/\[\d+\]/g, "")
+      .replace(/\s+([.,;:!?])/g, "$1")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  };
+
+  let qisaCavab = formatla(metn);
+
+  // Mənbə xülasəsi
+  if (sitatlar && sitatlar.length > 0) {
+    const menbeAdlari = [...new Set(sitatlar.slice(0, 3).map(s => {
+      const m = s.basliq?.match(/^(Maddə\s+\d+[0-9.-]*)/i);
+      return m ? m[1] : (s.menbe_adi || s.basliq || "").slice(0, 25);
+    }))].filter(Boolean);
+    if (menbeAdlari.length > 0) {
+      qisaCavab += "\n\n📚 <b>Əsas:</b> " + menbeAdlari.join(", ");
+    }
+  }
+
+  // Əlaqəli suallar
+  if (novbetiSuallar.length > 0) {
+    qisaCavab += "\n\n💡 <b>Əlaqəli suallar:</b>\n" + novbetiSuallar.slice(0, 2).map((s, idx) => `${idx + 1}. ${s}`).join("\n");
+  }
+
+  return {
+    qisa: qisaCavab,
+    genis: genisMetn ? formatla(genisMetn) : null,
+    suallar: novbetiSuallar
+  };
+}
+
+async function tgMesajGonder(token, chatId, metn, secimler = {}) {
   try {
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    const body = {
+      chat_id: chatId,
+      text: metn.slice(0, 4000),
+      parse_mode: "HTML",
+      ...secimler
+    };
+    let res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: metn.slice(0, 4000)
-      }),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(10000)
     });
+    let data = await res.json();
+    if (!data.ok && data.description?.includes("can't parse entities")) {
+      delete body.parse_mode;
+      body.text = metn.replace(/<[^>]+>/g, "").slice(0, 4000);
+      res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(10000)
+      });
+      data = await res.json();
+    }
+    return data;
   } catch (_) {}
 }
 
@@ -112,6 +207,31 @@ function canliMesajiBazayaYaz({ platforma = "Telegram", qovluq_id, gonderen, tar
 }
 
 async function tgUpdateEmalEt(token, update) {
+  // Callback query (İnline düymə basıldıqda)
+  if (update.callback_query) {
+    const cb = update.callback_query;
+    const cbChatId = cb.message?.chat?.id;
+    const data = cb.data || "";
+
+    await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ callback_query_id: cb.id }),
+      signal: AbortSignal.timeout(5000)
+    }).catch(() => {});
+
+    if (data.startsWith("det_")) {
+      const detalId = data.replace("det_", "");
+      const qeyd = tgDetalliYaddas.get(detalId);
+      if (qeyd && qeyd.metn && cbChatId) {
+        await tgMesajGonder(token, cbChatId, qeyd.metn);
+      } else if (cbChatId) {
+        await tgMesajGonder(token, cbChatId, "ℹ️ Bu sualın detallı təhlili üçün sualı yenidən göndərə bilərsiniz.");
+      }
+    }
+    return;
+  }
+
   const msg = update.message || update.channel_post;
   if (!msg) return;
 
@@ -149,7 +269,23 @@ async function tgUpdateEmalEt(token, update) {
       const agent = require("./agent");
       await tgMesajGonder(token, chatId, "🧠 Düşünürəm və mənbələri analiz edirəm...");
       const nət = await agent.agentSualCavabla({ sual: metn, qovluq_id: "all" });
-      await tgMesajGonder(token, chatId, nət.cavab.metn);
+      const formatlanmis = telegramCavabiFormatla(nət.cavab.metn, nət.sitatlar);
+
+      const secimler = {};
+      if (formatlanmis.genis) {
+        const detalId = crypto.randomUUID().slice(0, 8);
+        tgDetalliYaddas.set(detalId, {
+          vaxt: Date.now(),
+          metn: formatlanmis.genis
+        });
+        secimler.reply_markup = {
+          inline_keyboard: [
+            [{ text: "🔍 Geniş Təhlil və Praktiki Nümunə", callback_data: `det_${detalId}` }]
+          ]
+        };
+      }
+
+      await tgMesajGonder(token, chatId, formatlanmis.qisa, secimler);
       return;
     } catch (e) {
       await tgMesajGonder(token, chatId, `⚠️ Xəta baş verdi: ${e.message}`);
@@ -216,7 +352,23 @@ async function tgUpdateEmalEt(token, update) {
         try {
           const agent = require("./agent");
           const netice = await agent.agentSualCavabla({ sual: analiz.metn, qovluq_id: "all" });
-          await tgMesajGonder(token, chatId, netice.cavab.metn);
+          const formatlanmis = telegramCavabiFormatla(netice.cavab.metn, netice.sitatlar);
+
+          const secimler = {};
+          if (formatlanmis.genis) {
+            const detalId = crypto.randomUUID().slice(0, 8);
+            tgDetalliYaddas.set(detalId, {
+              vaxt: Date.now(),
+              metn: formatlanmis.genis
+            });
+            secimler.reply_markup = {
+              inline_keyboard: [
+                [{ text: "🔍 Geniş Təhlil və Praktiki Nümunə", callback_data: `det_${detalId}` }]
+              ]
+            };
+          }
+
+          await tgMesajGonder(token, chatId, formatlanmis.qisa, secimler);
         } catch (_) {}
       } else {
         await tgMesajGonder(token, chatId, `🎙️ Səsli qeyd yaddaşa yazıldı.`);
