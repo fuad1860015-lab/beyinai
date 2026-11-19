@@ -1,0 +1,17 @@
+{
+  "name": "beyin-ai",
+  "version": "1.0.0",
+  "description": "Şəxsi AI Asistant və NotebookLM Hibridi — Sənəd, Link, WhatsApp və Telegram Analizi",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --no-warnings server.js",
+    "dev": "node --no-warnings --watch server.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "mammoth": "^1.13.0",
+    "pdfjs-dist": "^6.5.438"
+  }
+}

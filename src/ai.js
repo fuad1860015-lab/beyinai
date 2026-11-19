@@ -1,0 +1,644 @@
+// Hibrid AI Mühərriki (v4.5 — Google Gemini File API / NotebookLM Mühərriki + Avtomatik Model Keçidi):
+// 1) Google Gemini File API (NotebookLM-in öz arxa mühərriki: PDF, Səs, Şəkil və Çatları birbaşa fileData URI ilə oxuyur!)
+// 2) Avtomatik Çox-Modelli Ehtiyat Zənciri (gemini-3-flash-preview -> gemini-3.1-flash-lite-preview -> gemini-flash-lite-latest)
+// 3) Daxili Pulsuz Bulud AI + Groq + Ollama
+"use strict";
+
+const db = require("./db");
+const geminiFiles = require("./gemini-files");
+
+// Aktiv və dərin düşünmə qabiliyyətli Gemini modelləri siyahısı
+const GEMINI_DERIN_MODELLER = [
+  "gemini-3-flash-preview",
+  "gemini-3.1-flash-lite-preview",
+  "gemini-flash-latest",
+  "gemini-flash-lite-latest"
+];
+
+const GEMINI_SURETLI_MODELLER = [
+  "gemini-3.1-flash-lite-preview",
+  "gemini-3-flash-preview",
+  "gemini-flash-lite-latest",
+  "gemini-flash-latest"
+];
+
+function geminiModelSiyahisiAl(secilmishModel, derinRejim = true) {
+  const bazaSiyahi = derinRejim ? GEMINI_DERIN_MODELLER : GEMINI_SURETLI_MODELLER;
+  const kohneYararsiz = !secilmishModel || secilmishModel === "gemini-2.5-flash" || secilmishModel === "gemini-2.5-pro";
+  if (kohneYararsiz) {
+    return bazaSiyahi;
+  }
+  const temiz = secilmishModel.trim();
+  if (derinRejim && (temiz === "gemini-flash-lite-latest" || temiz === "gemini-3.1-flash-lite-preview")) {
+    return bazaSiyahi;
+  }
+  return Array.from(new Set([temiz, ...bazaSiyahi]));
+}
+
+// ---- 1. Vektorlaşdırma (Embeddings) ----
+async function vektorYarat(metn, tenz = null) {
+  const t = tenz || db.tenzimlemeleriAl();
+  const temiz = String(metn || "").trim().slice(0, 6000);
+  if (!temiz) return null;
+
+  try {
+    if (t.ai_provayder === "ollama") {
+      const url = (t.ollama_url || "http://127.0.0.1:11434").replace(/\/$/, "");
+      const model = t.ollama_embed_model || "nomic-embed-text";
+      const res = await fetch(`${url}/api/embeddings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model, prompt: temiz }),
+        signal: AbortSignal.timeout(8000)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.embedding) && data.embedding.length > 0) return data.embedding;
+      }
+    }
+
+    if (t.gemini_api_key) {
+      const key = t.gemini_api_key.trim();
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${encodeURIComponent(key)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "models/gemini-embedding-001",
+            content: { parts: [{ text: temiz }] }
+          }),
+          signal: AbortSignal.timeout(6000)
+        }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data.embedding && Array.isArray(data.embedding.values)) {
+          return data.embedding.values;
+        }
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
+async function menbeVektorlashdir(menbeDetali) {
+  if (!menbeDetali) return;
+  const t = db.tenzimlemeleriAl();
+
+  if (t.gemini_api_key) {
+    try {
+      await geminiFiles.menbeniGeminiIleSinxronEt(menbeDetali, t.gemini_api_key);
+    } catch (_) {}
+  }
+
+  if (!Array.isArray(menbeDetali.parcalar)) return;
+  if (!t.gemini_api_key && t.ai_provayder !== "ollama") return;
+
+  const siyahı = menbeDetali.parcalar.slice(0, 25);
+  for (const p of siyahı) {
+    const metn = `${p.basliq ? p.basliq + "\n" : ""}${p.gonderen ? "Göndərən: " + p.gonderen + "\n" : ""}${p.metn}`;
+    const v = await vektorYarat(metn, t);
+    if (v) {
+      db.parcaVektorYenile(p.id, v);
+    }
+  }
+}
+
+// ---- 2. Multimodal Analiz: Səsli Mesajlar (Voice) və Şəkillər / Skan PDF (Vision OCR) ----
+async function mediaAnalizEt({ buffer, mimeType, faylAdi = "media" }) {
+  const t = db.tenzimlemeleriAl();
+  const isAudio = mimeType.startsWith("audio/") || /\.(ogg|opus|mp3|wav|m4a)$/i.test(faylAdi);
+  const isImage = mimeType.startsWith("image/") || /\.(png|jpe?g|webp|bmp)$/i.test(faylAdi);
+  const isPdf = mimeType === "application/pdf" || /\.pdf$/i.test(faylAdi);
+
+  if (isAudio && t.groq_api_key && !t.gemini_api_key) {
+    try {
+      const form = new FormData();
+      const blob = new Blob([buffer], { type: mimeType || "audio/ogg" });
+      form.append("file", blob, faylAdi);
+      form.append("model", "whisper-large-v3-turbo");
+      form.append("response_format", "json");
+
+      const res = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${t.groq_api_key.trim()}` },
+        body: form,
+        signal: AbortSignal.timeout(40000)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.text) return { ugurlu: true, metn: data.text.trim(), usul: "Groq Whisper" };
+      }
+    } catch (_) {}
+  }
+
+  if (t.gemini_api_key) {
+    try {
+      const key = t.gemini_api_key.trim();
+      const gMime = geminiFiles.geminiMimeTeyinEt(faylAdi, mimeType);
+
+      const fileObj = await geminiFiles.geminiServereYukle({
+        buffer,
+        mimeType: gMime,
+        displayName: faylAdi,
+        apiKey: key
+      });
+
+      let prompt = "";
+      if (isAudio) {
+        prompt =
+          "Bu səs yazısını (səsli mesajı) diqqətlə dinlə və tam olaraq danışılan dildə (Azərbaycan, Rus, Türk və ya İngilis) sözbəsöz mətnə çevir (transkripsiya et). Əgər səsdə vacib rəqəmlər, tarixlər, adlar və ya tapşırıqlar varsa, mətnin sonunda '[Qısa Xülasə]:' başlığı ilə 1-2 cümləlik xülasə də əlavə et.";
+      } else if (isImage) {
+        prompt =
+          "Bu şəkli (skrinşot, sənəd, qaimə, çek və ya çat şəkli) detallı analiz et. Şəkildəki BÜTÜN yazıları, rəqəmləri, tarixləri, məbləğləri və cədvəlləri olduğu kimi oxuyub çıxar (OCR).";
+      } else if (isPdf) {
+        prompt =
+          "Bu PDF sənədinin əsas məzmununu, bölmələrini, vacib maddələrini, rəqəmlərini və tarixlərini strukturlaşdırılmış mətn kimi çıxar.";
+      }
+
+      const modeller = geminiModelSiyahisiAl(t.gemini_model);
+      for (const model of modeller) {
+        try {
+          const res = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                contents: [
+                  {
+                    role: "user",
+                    parts: [
+                      { fileData: { mimeType: fileObj.mimeType, fileUri: fileObj.uri } },
+                      { text: prompt }
+                    ]
+                  }
+                ],
+                generationConfig: { temperature: 0.1 }
+              }),
+              signal: AbortSignal.timeout(25000)
+            }
+          );
+
+          if (res.ok) {
+            const data = await res.json();
+            const cavabMetn = data?.candidates?.[0]?.content?.parts?.map(p => p.text || "").join("\n").trim();
+            if (cavabMetn) {
+              return {
+                ugurlu: true,
+                metn: cavabMetn,
+                usul: `NotebookLM / Gemini File API (${model})`,
+                gemini_file: fileObj
+              };
+            }
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
+
+  return {
+    ugurlu: false,
+    metn: `[Media faylı: ${faylAdi} (${mimeType}). Səs və ya şəklin birbaşa NotebookLM mühərriki ilə oxunması üçün sağ yuxarıdakı ⚙️ AI Mühərriki bölməsindən pulsuz Gemini API açarı əlavə edin.]`,
+    usul: "İlkin Qeyd"
+  };
+}
+
+// ---- 3. Offline Analitik Sintezator ----
+function metniCumlelereBol(metn) {
+  const birleshmish = String(metn || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/([a-zəıöüşçğ,])\n+([a-zəıöüşçğ])/gi, "$1 $2");
+
+  return birleshmish
+    .split(/\n+|(?<=[.!?])\s+(?=[A-ZƏİÖÜŞÇĞ0-9IVX])/g)
+    .map(c => c.replace(/\s+/g, " ").trim())
+    .filter(c => c.length >= 35);
+}
+
+function lokalAnalitikCavabQur(sual, sitatlar) {
+  if (!sitatlar || sitatlar.length === 0) {
+    return `Bazadakı aktiv mənbələrdə bu suala uyğun məlumat tapılmadı. Sol paneldən PDF, Word, Excel, Link və ya WhatsApp/Telegram çıxarışı yüklədiyinizdən əmin olun.`;
+  }
+
+  const kokler = db.sozKokleri(sual);
+  const maddeler = [];
+  const gorulen = new Set();
+
+  for (const st of sitatlar.slice(0, 6)) {
+    const cumleler = metniCumlelereBol(st.metn);
+    for (const c of cumleler) {
+      const cAz = db.azKicilt(c);
+      const cNorm = db.azNormallashdir(cAz);
+      let uygun = 0;
+      for (const k of kokler) {
+        if (cAz.includes(k.kok) || cNorm.includes(k.normKok)) uygun++;
+      }
+      if ((uygun > 0 || kokler.length === 0) && !gorulen.has(c.slice(0, 60))) {
+        gorulen.add(c.slice(0, 60));
+        maddeler.push({
+          bal: uygun * 10 + st.bal,
+          metn: c,
+          basliq: st.basliq || st.menbe_adi,
+          gonderen: st.gonderen,
+          tarix: st.tarix,
+          nomre: st.nomre
+        });
+      }
+    }
+  }
+
+  maddeler.sort((a, b) => b.bal - a.bal);
+  const secilenler = maddeler.slice(0, 8);
+
+  if (secilenler.length === 0) {
+    const parcaSetirler = sitatlar.slice(0, 5).map(s => {
+      const temiz = s.metn.replace(/\s+/g, " ").trim().slice(0, 450);
+      return `- **${s.basliq || s.menbe_adi}**: ${temiz} [${s.nomre}]`;
+    });
+    return `### 📌 Konkret və Qısa Cavab:\n\n${parcaSetirler.slice(0, 2).join("\n\n")}\n\n<DETALLI_ANALIZ>\n### 🔍 Geniş Təhlil və Hüquqi/Nəzəri Mənbələr:\n\n${parcaSetirler.join("\n\n")}\n</DETALLI_ANALIZ>`;
+  }
+
+  const qisaSetirler = secilenler.slice(0, 3).map(m => {
+    return `- ${m.metn} [${m.nomre}]`;
+  });
+
+  const etrafliSetirler = secilenler.slice(3).map(m => {
+    const kim = m.gonderen ? ` (**${m.gonderen}**${m.tarix ? `, ${m.tarix}` : ""})` : "";
+    return `- ${m.metn}${kim} [${m.nomre}]`;
+  });
+
+  return `### 📌 Konkret və Qısa Cavab:\n\n${qisaSetirler.join("\n\n")}\n\n<DETALLI_ANALIZ>\n### 🔍 Geniş Təhlil, Şərtlər və Bütün Mənbələr:\n\n${(etrafliSetirler.length > 0 ? etrafliSetirler : qisaSetirler).join("\n\n")}\n</DETALLI_ANALIZ>`;
+}
+
+// ---- 4. LLM Çağırışı (NotebookLM Gemini File API + Dərin Düşünmə / Thinking Mode + Avtomatik Ehtiyat Zənciri) ----
+async function llmCagir({ sistemPromptu, istifadeciPromptu, geminiFileParts = [], tarixce = [], tenz, derinRejim = null }) {
+  const t = tenz || db.tenzimlemeleriAl();
+  const provayder = t.ai_provayder || "gemini";
+  const aktivDerinRejim = derinRejim !== null ? Boolean(derinRejim) : (t.derin_rejim !== "0");
+  llmCagir.sonMelumat = { daxiliDusunce: "", model: "", derinRejim: aktivDerinRejim };
+
+  // 1) GOOGLE GEMINI FILE API & DEEP THINKING ENGINE
+  if (t.gemini_api_key && provayder === "gemini") {
+    const key = t.gemini_api_key.trim();
+    const modeller = geminiModelSiyahisiAl(t.gemini_model, aktivDerinRejim);
+
+    const userParts = [
+      ...geminiFileParts.map(f => ({
+        fileData: {
+          mimeType: f.mimeType,
+          fileUri: f.uri
+        }
+      })),
+      { text: istifadeciPromptu }
+    ];
+
+    const contents = [
+      ...tarixce.slice(-4).map(m => ({
+        role: m.rol === "assistant" ? "model" : "user",
+        parts: [{ text: m.metn }]
+      })),
+      {
+        role: "user",
+        parts: userParts
+      }
+    ];
+
+    for (const model of modeller) {
+      try {
+        const dusunmeDestekleyir = model !== "gemini-flash-lite-latest";
+        const generationConfig = {
+          temperature: aktivDerinRejim ? 0.12 : 0.15,
+          maxOutputTokens: aktivDerinRejim ? 5120 : 4096
+        };
+        if (dusunmeDestekleyir) {
+          generationConfig.thinkingConfig = {
+            includeThoughts: true,
+            thinkingBudget: aktivDerinRejim ? 1280 : 512
+          };
+        }
+
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              systemInstruction: { parts: [{ text: sistemPromptu }] },
+              contents,
+              generationConfig
+            }),
+            signal: AbortSignal.timeout(15000)
+          }
+        );
+
+        if (res.ok) {
+          const data = await res.json();
+          const parts = data?.candidates?.[0]?.content?.parts || [];
+          const dusunceMetni = parts
+            .filter(p => p.thought && p.text)
+            .map(p => p.text.trim())
+            .join("\n")
+            .trim();
+          const cavab = parts
+            .filter(p => !p.thought && p.text)
+            .map(p => p.text)
+            .join("\n")
+            .trim();
+
+          if (cavab) {
+            llmCagir.sonMelumat = {
+              daxiliDusunce: dusunceMetni,
+              model,
+              derinRejim: aktivDerinRejim
+            };
+            return cavab;
+          }
+        }
+      } catch (_) {
+        // Bu modeldə timeout və ya 503 oldusa, dərhal növbəti Gemini modelini yoxla!
+      }
+    }
+  }
+
+  // 2) OLLAMA (Tam Lokal)
+  if (provayder === "ollama") {
+    const url = (t.ollama_url || "http://127.0.0.1:11434").replace(/\/$/, "");
+    const model = t.ollama_model || "llama3.2";
+    const mesajlar = [
+      { role: "system", content: sistemPromptu },
+      ...tarixce.slice(-4).map(m => ({ role: m.rol === "assistant" ? "assistant" : "user", content: m.metn })),
+      { role: "user", content: istifadeciPromptu }
+    ];
+
+    const res = await fetch(`${url}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, messages: mesajlar, stream: false, options: { temperature: 0.2 } }),
+      signal: AbortSignal.timeout(60000)
+    });
+    if (!res.ok) {
+      throw new Error(`Ollama (${res.status}): Lokal Ollama proqramının açıq olduğundan əmin olun.`);
+    }
+    const data = await res.json();
+    return data?.message?.content || "";
+  }
+
+  // 3) GROQ API
+  if (t.groq_api_key && (provayder === "groq" || !t.gemini_api_key)) {
+    const model = t.groq_model || "llama-3.3-70b-versatile";
+    const mesajlar = [
+      { role: "system", content: sistemPromptu },
+      ...tarixce.slice(-4).map(m => ({ role: m.rol === "assistant" ? "assistant" : "user", content: m.metn })),
+      { role: "user", content: istifadeciPromptu }
+    ];
+
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${t.groq_api_key.trim()}`
+      },
+      body: JSON.stringify({ model, messages: mesajlar, temperature: 0.2, max_tokens: 4096 }),
+      signal: AbortSignal.timeout(35000)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const cavab = data?.choices?.[0]?.message?.content;
+      if (cavab) return cavab;
+    }
+  }
+
+  // 4) DAXİLİ PULSUZ AI MÜHƏRRİKİ (Ehtiyat Bulud LLM)
+  try {
+    const mesajlar = [
+      { role: "system", content: sistemPromptu },
+      ...tarixce.slice(-2).map(m => ({
+        role: m.rol === "assistant" ? "assistant" : "user",
+        content: String(m.metn || "").slice(0, 1200)
+      })),
+      { role: "user", content: istifadeciPromptu.slice(0, 14000) }
+    ];
+
+    const res = await fetch("https://text.pollinations.ai/openai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "openai",
+        messages: mesajlar,
+        temperature: 0.2
+      }),
+      signal: AbortSignal.timeout(35000)
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      const cavab = data?.choices?.[0]?.message?.content;
+      if (cavab && cavab.trim().length > 10) {
+        return cavab.trim();
+      }
+    }
+  } catch (_) {}
+
+  return null;
+}
+
+// ---- 5. Sitatlı RAG + NotebookLM File API + Uzunmüddətli Yaddaş Cavab Mühərriki ----
+async function sitatliCavabVer({
+  sual,
+  qovluq_id = "all",
+  gonderen = "",
+  tarix_baslangic = "",
+  tarix_son = "",
+  menbe_nov = ""
+}) {
+  const tenz = db.tenzimlemeleriAl();
+
+  const yaddasEmri = sual.match(/^(?:yadda saxla ki|unutma ki|qeyd et ki|yadda saxla\s*[:-])\s*(.+)/i);
+  if (yaddasEmri && yaddasEmri[1]) {
+    db.yaddasElaveEt({
+      kateqoriya: "qayda",
+      metn: yaddasEmri[1].trim(),
+      menbe: "Birbaşa Təlimat",
+      vaciblik: 5
+    });
+  }
+
+  const sorguVektoru = db.bazadaVektorVarmi() ? await vektorYarat(sual, tenz) : null;
+  const tapilanParcalar = db.hibridAxtar({
+    sorgu: sual,
+    sorguVektoru,
+    qovluq_id,
+    gonderen,
+    tarix_baslangic,
+    tarix_son,
+    menbe_nov,
+    limit: 8
+  });
+
+  const geminiFileParts = [];
+  if (tapilanParcalar.length === 0 && tenz.gemini_api_key && (tenz.ai_provayder || "gemini") === "gemini") {
+    const aktivMenbeler = db.menbeleriAl(qovluq_id).filter(m => m.aktiv === 1 && (!menbe_nov || m.nov === menbe_nov));
+    for (const m of aktivMenbeler.slice(0, 4)) {
+      try {
+        const gFile = await geminiFiles.menbeniGeminiIleSinxronEt(m, tenz.gemini_api_key);
+        if (gFile && gFile.uri) {
+          geminiFileParts.push({
+            menbe_id: m.id,
+            ad: m.ad,
+            uri: gFile.uri,
+            mimeType: gFile.mimeType
+          });
+        }
+      } catch (_) {}
+    }
+  }
+
+  const sexsiYaddas = db.yaddaslariAl().slice(0, 20);
+  const tarixce = db.sohbetleriAl(qovluq_id, 6);
+
+  const sitatlar = tapilanParcalar.map((p, idx) => ({
+    nomre: idx + 1,
+    parca_id: p.id,
+    menbe_id: p.menbe_id,
+    menbe_adi: p.menbe_adi,
+    menbe_novu: p.menbe_novu,
+    basliq: p.basliq,
+    gonderen: p.gonderen,
+    tarix: p.tarix,
+    metn: p.metn,
+    bal: p.bal
+  }));
+
+  const menbeKonteksti = sitatlar.length > 0
+    ? sitatlar.map(s => {
+        const metaHisse = [
+          `Mənbə faylı: ${s.menbe_adi} (${s.menbe_novu})`,
+          s.gonderen ? `Göndərən/Şəxs: ${s.gonderen}` : null,
+          s.tarix ? `Tarix/Saat: ${s.tarix}` : null,
+          s.basliq ? `Bölmə: ${s.basliq}` : null
+        ].filter(Boolean).join(" | ");
+        return `=== [Mənbə ${s.nomre}] (${metaHisse}) ===\n${s.metn}`;
+      }).join("\n\n")
+    : "Bazaya hələ bu suala uyğun sənəd və ya çat yüklənməyib.";
+
+  const yaddasKonteksti = sexsiYaddas.length > 0
+    ? sexsiYaddas.map(y => `- [${y.kateqoriya.toUpperCase()}] ${y.metn}`).join("\n")
+    : "Hələ şəxsi yaddaş qeydi yoxdur.";
+
+  const sistemPromptu = `${tenz.sistem_telimati || "Sən istifadəçinin şəxsi AI asistantı və NotebookLM hibridisən."}
+
+ƏSAS QAYDALAR:
+1. İKİ-MƏRHƏLƏLİ CAVAB: Cavabını hər zaman 2 hissəyə böl:
+   - Hissə 1: Əvvəlcə birbaşa, ən vacib nöqtələri göstərən "### 📌 Konkret və Qısa Cavab:" (3-5 maddə və ya 1-2 qısa abzas).
+   - Hissə 2: Bütün geniş təhlili, maddələri, incəlikləri və izahatları "<DETALLI_ANALIZ>\n### 🔍 Detallı Təhlil və Hüquqi/Praktiki Əsaslar:\n...\n</DETALLI_ANALIZ>" teqləri daxilində yaz.
+2. Əgər qanunvericilikdə və ya mənbələrdə konkret fəaliyyət sahələri (məs: İT, dizayn, tərcümə, reklam, təhsil, hüquq, mühasibat və s.), şərtlər və ya maddələr sadalanırsa, onları BƏND-BƏND, DƏQİQ VƏ AYDIN siyahı ilə yaz.
+3. Mənbədən götürdüyün hər bir faktın, müddəanın, rəqəmin, tarixin və ya mesajın sonunda MÜTLƏQ həmin mənbənin nömrəsini kvadrat mötərizədə göstər: məsələn [1], [2], [1, 2].
+4. Əgər mənbədə ümumi prinsip var amma konkret sahələrin siyahısı natamamdırsa, öz dəqiq hüquqi biliyinlə həmin konkret sahələri və şərtləri dərhal tamamlayıb təqdim et.
+5. AVTOMATİK ŞƏXSİ YADDAŞ: Əgər istifadəçinin sualında onun özü, işi, müştəriləri və ya gələcəkdə xatırlanmalı olan vacib bir qayda varsa, cavabının ən sonunda yeni sətirdə bu formatda yaz (yoxdursa yazma):
+<YADDAŞ kateqoriya="fakt|qayda|tapşırıq|şəxs">Yadda saxlanılmalı qısa və dəqiq fakt</YADDAŞ>
+
+UZUNMÜDDƏTLİ ŞƏXSİ YADDAŞ:
+${yaddasKonteksti}`;
+
+  const istifadeciPromptu = `${geminiFileParts.length > 0 ? `QEYD: Hazırda bazada aktiv olan və Google File API (NotebookLM) vasitəsilə sənə qoşulmuş fayllar bunlardır: ${geminiFileParts.map(f => f.ad).join(", ")}.\n\n` : ""}TAPILMIŞ SİTAT BLOKLARI:
+${menbeKonteksti}
+
+İSTİFADƏÇİNİN SUALI:
+${sual}`;
+
+  let xamCavab = await llmCagir({
+    sistemPromptu,
+    istifadeciPromptu,
+    geminiFileParts,
+    tarixce,
+    tenz
+  });
+
+  if (!xamCavab) {
+    xamCavab = lokalAnalitikCavabQur(sual, sitatlar);
+  }
+
+  const yeniYaddaslar = [];
+  const temizCavab = xamCavab
+    .replace(/<YADDAŞ(?:\s+kateqoriya="([^"]*)")?>([\s\S]*?)<\/YADDAŞ>/gi, (_, kat, m) => {
+      if (tenz.avto_yaddas !== "0" && m && m.trim()) {
+        const elave = db.yaddasElaveEt({
+          kateqoriya: kat || "fakt",
+          metn: m.trim(),
+          menbe: "Avtomatik Analiz",
+          vaciblik: 4
+        });
+        if (elave) yeniYaddaslar.push(elave);
+      }
+      return "";
+    })
+    .replace(/(?:---\s*)?\*\*Yadda saxlanılmalı[^*]*\*\*[\s\S]*$/i, "")
+    .trim();
+
+  db.sohbetElaveEt({ qovluq_id, rol: "user", metn: sual, sitatlar: [] });
+  const saxlanilanCavab = db.sohbetElaveEt({
+    qovluq_id,
+    rol: "assistant",
+    metn: temizCavab,
+    sitatlar
+  });
+
+  return {
+    cavab: saxlanilanCavab,
+    sitatlar,
+    yeniYaddaslar,
+    notebooklmFaylSayi: geminiFileParts.length
+  };
+}
+
+// Universal AI Sorğu Tərcüməçisi və Maddə Planlayıcısı (İstənilən sənəd: Konstitusiya, Vergi, Əmək Məcəlləsi, Müqavilə, Kitab üçün)
+async function universalSorguPlanla({ sual, aktivMenbeAdlari = [], tenz = null }) {
+  const t = tenz || db.tenzimlemeleriAl();
+  if (!t.gemini_api_key || (t.ai_provayder || "gemini") !== "gemini") return [];
+
+  const prompt = `İstifadəçinin sualı: "${sual}"
+Bazadakı sənədlər: ${aktivMenbeAdlari.slice(0, 6).join(", ") || "Ümumi sənədlər"}
+
+Tapşırıq: İstifadəçi sualı gündəlik dildə verib. Bu sualın cavabını yuxarıdakı sənədlərdə dəqiq tapmaq üçün onu rəsmi hüquqi/texniki terminlərə və aid olduğu dəqiq Maddə nömrələrinə (məs: "Maddə 163", "Maddə 72.4-1", "Maddə 125", "Maddə 169" və s.) çevir.
+Yalnız 3 fərqli axtarış sətri yaz (hər sətirdə açar sözlər və maddə nömrələri olsun, nömrələmə və əlavə izah yazma):`;
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=${encodeURIComponent(t.gemini_api_key.trim())}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 160
+          }
+        }),
+        signal: AbortSignal.timeout(3500)
+      }
+    );
+    if (res.ok) {
+      const data = await res.json();
+      const metn = data?.candidates?.[0]?.content?.parts?.map(p => p.text || "").join("\n") || "";
+      return metn
+        .split(/\r?\n/)
+        .map(s => s.replace(/^[-*•\d.)\s]+/, "").trim())
+        .filter(s => s.length >= 4 && s.length <= 180)
+        .slice(0, 3);
+    }
+  } catch (_) {}
+  return [];
+}
+
+module.exports = {
+  vektorYarat,
+  menbeVektorlashdir,
+  mediaAnalizEt,
+  llmCagir,
+  universalSorguPlanla,
+  lokalAnalitikCavabQur,
+  sitatliCavabVer
+};
