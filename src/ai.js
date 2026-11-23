@@ -85,22 +85,28 @@ async function vektorYarat(metn, tenz = null) {
 async function menbeVektorlashdir(menbeDetali) {
   if (!menbeDetali) return;
   const t = db.tenzimlemeleriAl();
+  const key = (t.gemini_api_key || "").trim();
+  const gecerliGeminiKey = key.startsWith("AIza");
 
-  if (t.gemini_api_key) {
+  if (gecerliGeminiKey) {
     try {
-      await geminiFiles.menbeniGeminiIleSinxronEt(menbeDetali, t.gemini_api_key);
+      await geminiFiles.menbeniGeminiIleSinxronEt(menbeDetali, key);
     } catch (_) {}
   }
 
   if (!Array.isArray(menbeDetali.parcalar)) return;
-  if (!t.gemini_api_key && t.ai_provayder !== "ollama") return;
+  if (!gecerliGeminiKey && t.ai_provayder !== "ollama") return;
 
-  const siyahı = menbeDetali.parcalar.slice(0, 25);
+  // Yalnız vektoru olmayan parçaları seç (maksimum 100 parça)
+  const siyahı = menbeDetali.parcalar.filter(p => !p.vektor).slice(0, 100);
   for (const p of siyahı) {
     const metn = `${p.basliq ? p.basliq + "\n" : ""}${p.gonderen ? "Göndərən: " + p.gonderen + "\n" : ""}${p.metn}`;
     const v = await vektorYarat(metn, t);
     if (v) {
       db.parcaVektorYenile(p.id, v);
+    } else {
+      // İlk sorğu uğursuz oldusa (məs: limit və ya açar xətası), qalanlarını boş yerə gözlətmə
+      break;
     }
   }
 }
@@ -209,16 +215,29 @@ async function mediaAnalizEt({ buffer, mimeType, faylAdi = "media" }) {
 function metniCumlelereBol(metn) {
   const birleshmish = String(metn || "")
     .replace(/\r\n/g, "\n")
+    // Parça başlığındakı "[Maddə 115... — davamı]" və praktiki keys sual etiketlərini təmizlə ki, yarımçıq cümlə kimi çıxmasın
+    .replace(/^\[[^\]]*?—\s*davamı\]\s*/gim, "")
+    .replace(/^(?:🎯|✅)\s*\[[^\]]+\]\s*/gim, "")
+    .replace(/^Sual\s*\/\s*Mövzu:[^\n]+\n?/gim, "")
     .replace(/([a-zəıöüşçğ,])\n+([a-zəıöüşçğ])/gi, "$1 $2");
 
   return birleshmish
     .split(/\n+|(?<=[.!?])\s+(?=[A-ZƏİÖÜŞÇĞ0-9IVX])/g)
-    .map(c => c.replace(/\s+/g, " ").trim())
-    .filter(c => c.length >= 35);
+    .map(c => c.replace(/^[-•*]+\s*/, "").replace(/\s+/g, " ").trim())
+    .filter(c => c.length >= 35 && !/—\s*davamı\]$/i.test(c));
 }
 
-function lokalAnalitikCavabQur(sual, sitatlar) {
-  if (!sitatlar || sitatlar.length === 0) {
+function lokalAnalitikCavabQur(sual, sitatlar, uygunQizilQaydalar = null, ziddiyyetQeydi = "") {
+  const qizillar = Array.isArray(uygunQizilQaydalar)
+    ? uygunQizilQaydalar
+    : (typeof db.aktualYaddaslariAl === "function" ? db.aktualYaddaslariAl(sual, 10).uygunQizilQaydalar : []);
+
+  const qizilSetirler = qizillar.slice(0, 2).map(q => {
+    const temizQayda = String(q.metn || "").replace(/^QIZIL\s*QAYDA(?:\s*\([^)]*\))?:\s*/i, "").trim();
+    return `- 🎯 **[Öyrədilmiş Qızıl Qayda]:** ${temizQayda}`;
+  });
+
+  if ((!sitatlar || sitatlar.length === 0) && qizilSetirler.length === 0) {
     return `Bazadakı aktiv mənbələrdə bu suala uyğun məlumat tapılmadı. Sol paneldən PDF, Word, Excel, Link və ya WhatsApp/Telegram çıxarışı yüklədiyinizdən əmin olun.`;
   }
 
@@ -226,20 +245,23 @@ function lokalAnalitikCavabQur(sual, sitatlar) {
   const maddeler = [];
   const gorulen = new Set();
 
-  for (const st of sitatlar.slice(0, 6)) {
+  for (const st of (sitatlar || []).slice(0, 7)) {
     const cumleler = metniCumlelereBol(st.metn);
+    const huquqBonusu = st.huquqi_pille === 1 ? 30 : (st.huquqi_pille === 2 ? 15 : 0);
     for (const c of cumleler) {
       const cAz = db.azKicilt(c);
       const cNorm = db.azNormallashdir(cAz);
       let uygun = 0;
       for (const k of kokler) {
-        if (cAz.includes(k.kok) || cNorm.includes(k.normKok)) uygun++;
+        if (db.azKicilt(cAz).includes(k.kok) || (k.kok.length >= 3 && cNorm.includes(k.normKok))) uygun++;
       }
-      if ((uygun > 0 || kokler.length === 0) && !gorulen.has(c.slice(0, 60))) {
-        gorulen.add(c.slice(0, 60));
+      const imza = c.slice(0, 65).toLowerCase();
+      if ((uygun > 0 || kokler.length === 0) && !gorulen.has(imza)) {
+        gorulen.add(imza);
+        const siraBonusu = Math.max(0, (7 - st.nomre) * 18);
         maddeler.push({
-          bal: uygun * 10 + st.bal,
-          metn: c,
+          bal: uygun * 14 + siraBonusu + huquqBonusu + Math.min(40, st.bal || 0),
+          metn: c.replace(/^[-•*]+\s*/, "").trim(),
           basliq: st.basliq || st.menbe_adi,
           gonderen: st.gonderen,
           tarix: st.tarix,
@@ -250,26 +272,75 @@ function lokalAnalitikCavabQur(sual, sitatlar) {
   }
 
   maddeler.sort((a, b) => b.bal - a.bal);
-  const secilenler = maddeler.slice(0, 8);
+  const secilenler = maddeler.slice(0, 10);
+
+  const ilkBasliq = (sitatlar && sitatlar[0]?.basliq) ? sitatlar[0].basliq : "";
+  const maddeMatch = ilkBasliq.match(/^(Maddə\s+\d+[0-9.–-]*)/i);
+  const movzuAd = maddeMatch ? maddeMatch[1] : (ilkBasliq.split("(")[0].trim().slice(0, 45) || "bu əməliyyat");
+  const novbetiBlok = `\n\n<NOVBETI_SUALLAR>\n- Bəs ${movzuAd} üzrə istisnalar və xüsusi şərtlər hansılardır?\n- Bu tələbin pozulmasına görə maliyyə sanksiyası və ya cərimə nə qədərdir?\n</NOVBETI_SUALLAR>`;
 
   if (secilenler.length === 0) {
-    const parcaSetirler = sitatlar.slice(0, 5).map(s => {
-      const temiz = s.metn.replace(/\s+/g, " ").trim().slice(0, 450);
+    const parcaSetirler = (sitatlar || []).slice(0, 5).map(s => {
+      const temiz = s.metn
+        .replace(/^\[[^\]]*?—\s*davamı\]\s*/gim, "")
+        .replace(/^[-•*]+\s*/gm, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 450);
       return `- **${s.basliq || s.menbe_adi}**: ${temiz} [${s.nomre}]`;
     });
-    return `### 📌 Konkret və Qısa Cavab:\n\n${parcaSetirler.slice(0, 2).join("\n\n")}\n\n<DETALLI_ANALIZ>\n### 🔍 Geniş Təhlil və Hüquqi/Nəzəri Mənbələr:\n\n${parcaSetirler.join("\n\n")}\n</DETALLI_ANALIZ>`;
+    const birlesikQisa = [...qizilSetirler, ...parcaSetirler.slice(0, 2)].join("\n\n");
+    return `### 📌 Konkret və Qısa Cavab:\n\n${birlesikQisa}${ziddiyyetQeydi ? "\n\n" + ziddiyyetQeydi : ""}\n\n<DETALLI_ANALIZ>\n### 🔍 Geniş Təhlil və Hüquqi/Nəzəri Mənbələr:\n\n${(parcaSetirler.length > 0 ? parcaSetirler : qizilSetirler).join("\n\n")}\n</DETALLI_ANALIZ>${novbetiBlok}`;
   }
 
-  const qisaSetirler = secilenler.slice(0, 3).map(m => {
-    return `- ${m.metn} [${m.nomre}]`;
-  });
+  const qisaSetirler = [
+    ...qizilSetirler,
+    ...secilenler.slice(0, 3).map(m => {
+      const maddeOn = m.basliq && /^Maddə\s+\d+/i.test(m.basliq) && !m.metn.toLowerCase().includes("maddə")
+        ? `**(${m.basliq.split(".")[0]})** `
+        : "";
+      return `- ${maddeOn}${m.metn} [${m.nomre}]`;
+    })
+  ];
 
-  const etrafliSetirler = secilenler.slice(3).map(m => {
+  // Qərar Ağacı / 3-Pilləli Şərtlər və İstisnalar Matrisi (Əsas Qayda -> Şərtlər/İstisnalar -> Cərimə və Risk)
+  const esasQaydaSetirleri = [];
+  const sertVeIstisnaSetirleri = [];
+  const sanksiyaRiskSetirleri = [];
+
+  for (const m of secilenler) {
     const kim = m.gonderen ? ` (**${m.gonderen}**${m.tarix ? `, ${m.tarix}` : ""})` : "";
-    return `- ${m.metn}${kim} [${m.nomre}]`;
-  });
+    const setir = `- ${m.metn}${kim} [${m.nomre}]`;
+    if (/(?:cərimə|sanksiya|pozulma|məsuliyyət|58\.|gecikmə|faiz\s*hesablanır)/i.test(m.metn)) {
+      sanksiyaRiskSetirleri.push(setir);
+    } else if (/(?:istisna|əgər|təqdirdə|bu\s*halda|şamil\s*edilmir|tətbiq\s*edilmir|keçmədikdə|keçdikdə|fərqli|şərti\s*ilə|məhdudiyyət)/i.test(m.metn)) {
+      sertVeIstisnaSetirleri.push(setir);
+    } else {
+      esasQaydaSetirleri.push(setir);
+    }
+  }
 
-  return `### 📌 Konkret və Qısa Cavab:\n\n${qisaSetirler.join("\n\n")}\n\n<DETALLI_ANALIZ>\n### 🔍 Geniş Təhlil, Şərtlər və Bütün Mənbələr:\n\n${(etrafliSetirler.length > 0 ? etrafliSetirler : qisaSetirler).join("\n\n")}\n</DETALLI_ANALIZ>`;
+  const detalliHisseler = [
+    `#### ✅ 1. Əsas Hüquqi Qayda və Tələblər:\n\n${
+      esasQaydaSetirleri.length > 0
+        ? esasQaydaSetirleri.join("\n\n")
+        : secilenler.slice(0, 3).map(m => `- ${m.metn} [${m.nomre}]`).join("\n\n")
+    }`,
+    `#### 🔀 2. Şərtlər, İstisnalar və Xüsusi Hallar (Qərar Ağacı):\n\n${
+      sertVeIstisnaSetirleri.length > 0
+        ? sertVeIstisnaSetirleri.join("\n\n")
+        : (qizilSetirler.length > 0
+            ? qizilSetirler.join("\n\n")
+            : `- Yuxarıdakı əsas qaydanın tətbiqi üçün əməliyyatın sənədləşməsi, vergi ödəyicisinin statusu və dövriyyə həddi nəzərə alınmalıdır [${secilenler[0]?.nomre || 1}].`)
+    }`,
+    `#### 🚨 3. Maliyyə Sanksiyası, Cərimə və Risklər:\n\n${
+      sanksiyaRiskSetirleri.length > 0
+        ? sanksiyaRiskSetirleri.join("\n\n")
+        : `- Qanunvericiliklə müəyyən edilmiş sənədləşmə, hesabatlıq və ödəniş şərtlərinə əməl edildikdə sanksiya riski yaranmır; tələblər pozulduqda Vergi Məcəlləsinin 57–58-ci maddələri üzrə maliyyə sanksiyası tətbiq edilir.`
+    }`
+  ];
+
+  return `### 📌 Konkret və Qısa Cavab:\n\n${qisaSetirler.join("\n\n")}${ziddiyyetQeydi ? "\n\n" + ziddiyyetQeydi : ""}\n\n<DETALLI_ANALIZ>\n### 🔍 Geniş Təhlil, Şərtlər və Qərar Matrisi:\n\n${detalliHisseler.join("\n\n")}\n</DETALLI_ANALIZ>${novbetiBlok}`;
 }
 
 // ---- 4. LLM Çağırışı (NotebookLM Gemini File API + Dərin Düşünmə / Thinking Mode + Avtomatik Ehtiyat Zənciri) ----
@@ -277,7 +348,7 @@ async function llmCagir({ sistemPromptu, istifadeciPromptu, geminiFileParts = []
   const t = tenz || db.tenzimlemeleriAl();
   const provayder = t.ai_provayder || "gemini";
   const aktivDerinRejim = derinRejim !== null ? Boolean(derinRejim) : (t.derin_rejim !== "0");
-  llmCagir.sonMelumat = { daxiliDusunce: "", model: "", derinRejim: aktivDerinRejim };
+  llmCagir.sonMelumat = { daxiliDusunce: "", model: "", derinRejim: aktivDerinRejim, xeta: "" };
 
   // 1) GOOGLE GEMINI FILE API & DEEP THINKING ENGINE
   if (t.gemini_api_key && provayder === "gemini") {
@@ -315,10 +386,11 @@ async function llmCagir({ sistemPromptu, istifadeciPromptu, geminiFileParts = []
         if (dusunmeDestekleyir) {
           generationConfig.thinkingConfig = {
             includeThoughts: true,
-            thinkingBudget: aktivDerinRejim ? 1280 : 512
+            thinkingBudget: aktivDerinRejim ? 1024 : 512
           };
         }
 
+        const timeoutMs = aktivDerinRejim ? 32000 : 20000;
         const res = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
           {
@@ -329,7 +401,7 @@ async function llmCagir({ sistemPromptu, istifadeciPromptu, geminiFileParts = []
               contents,
               generationConfig
             }),
-            signal: AbortSignal.timeout(15000)
+            signal: AbortSignal.timeout(timeoutMs)
           }
         );
 
@@ -351,9 +423,17 @@ async function llmCagir({ sistemPromptu, istifadeciPromptu, geminiFileParts = []
             llmCagir.sonMelumat = {
               daxiliDusunce: dusunceMetni,
               model,
-              derinRejim: aktivDerinRejim
+              derinRejim: aktivDerinRejim,
+              xeta: ""
             };
             return cavab;
+          }
+        } else if (res.status === 400 || res.status === 401 || res.status === 403) {
+          const errText = await res.text().catch(() => "");
+          if (/API_KEY_INVALID|API key not valid|PERMISSION_DENIED/i.test(errText)) {
+            llmCagir.sonMelumat.xeta =
+              "Gemini API açarı keçərsizdir (Google AI Studio açarları 'AIzaSy...' ilə başlamalıdır). Tənzimləmələrdən düzgün açar daxil edin.";
+            break; // Digər Gemini modellərini boş yerə yoxlama!
           }
         }
       } catch (_) {

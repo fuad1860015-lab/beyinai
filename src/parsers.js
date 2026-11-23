@@ -27,13 +27,23 @@ function senedPasportuCixar(metn) {
 
   // 4) Tapşırıqlar, Sözlər və Öhdəlik cümlələri
   const tapsiriqAcar = /(?:təhvil|göndər|ödənil|hazırla|bitir|son tarix|deadline|lazımdır|olmalıdır|edəcəm|edəcəyəm|söz verir|cərimə|avans|qaimə|müqavilə)/i;
+  // 5) Avtonom Öyrənmə üçün Yüksək Dəyərli Hüquqi/Vergi Qaydaları (Rəqəm/Faiz/Maddə + Norma feili)
+  const qaydaFeilAcar = /(?:azaddır|məcburidir|qadağandır|tutulur|cərimə|maliyyə\s*sanksiyası|əvəzləşdirilir|gəlirdən\s*çıxılmır|gəlirdən\s*çıxılır|dəqiqləşdirilir|ləğv\s*edilir|hesablanır|tətbiq\s*edilmir)/i;
+  const qaydaReqemAcar = /(?:\b\d+(?:[.,\s]\d+)*\s*(?:%|faiz|AZN|manat|gün|iş\s*günü|ay|il)\b|\bmaddə\s*\d+|\b\d{1,3}\.\d+(?:\.\d+)*\b)/i;
+
   const cumleler = s.split(/(?<=[.!?])\s+|\n+/);
   const tapsiriqlar = [];
+  const avto_qaydalar = [];
+
   for (const c of cumleler) {
-    const t = c.trim();
-    if (t.length >= 20 && t.length <= 260 && tapsiriqAcar.test(t)) {
+    const t = c.replace(/^[-•*]+\s*/, "").replace(/\s+/g, " ").trim();
+    if (t.length >= 20 && t.length <= 260 && tapsiriqAcar.test(t) && tapsiriqlar.length < 15) {
       tapsiriqlar.push(t);
-      if (tapsiriqlar.length >= 15) break;
+    }
+    if (t.length >= 45 && t.length <= 320 && qaydaFeilAcar.test(t) && qaydaReqemAcar.test(t) && avto_qaydalar.length < 6) {
+      if (!avto_qaydalar.some(q => q.slice(0, 50).toLowerCase() === t.slice(0, 50).toLowerCase())) {
+        avto_qaydalar.push(t);
+      }
     }
   }
 
@@ -41,7 +51,8 @@ function senedPasportuCixar(metn) {
     meblegler,
     tarixler,
     kodlar,
-    tapsiriqlar
+    tapsiriqlar,
+    avto_qaydalar
   };
 }
 
@@ -194,9 +205,23 @@ function metniParcala(metn, basliqPrefix = "Hissə", parcaOlcusu = 1500, ustUste
       basliq = cariBolmeHissesi > 1
         ? `${cariBolmeBasligi} (Hissə ${cariBolmeHissesi})`
         : cariBolmeBasligi;
+
+      // Uzun maddələrin içindəki alt-bənd nömrələrini (məs: 102.1.30, 175.8, 218.5) tapıb başlığa əlavə et!
+      const anaMaddeMatch = cariBolmeBasligi.match(/^Maddə\s+(\d+[0-9-]*)/i);
+      if (anaMaddeMatch && anaMaddeMatch[1] && !basliq.includes("[Bənd:")) {
+        const anaNo = anaMaddeMatch[1];
+        const bendRegex = new RegExp(`\\b(${anaNo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.\\d+(?:\\.\\d+)*(?:-\\d+)?)\\b`, "g");
+        const bendler = Array.from(new Set(Array.from(t.matchAll(bendRegex)).map(m => m[1])));
+        if (bendler.length === 1) {
+          basliq += ` [Bənd: ${bendler[0]}]`;
+        } else if (bendler.length > 1) {
+          basliq += ` [Bənd: ${bendler[0]}–${bendler[bendler.length - 1]}]`;
+        }
+      }
+
       // Əgər uzun maddənin 2-ci, 3-cü hissəsidirsə və mətndə maddənin adı yoxdursa, əvvəlinə kontekst başlığını əlavə et ki axtarışda və sitatda itməsin!
       if (cariBolmeHissesi > 1 && !t.startsWith(cariBolmeBasligi)) {
-        yekunMetn = `[${cariBolmeBasligi} — davamı]\n${t}`;
+        yekunMetn = `[${basliq} — davamı]\n${t}`;
       }
       cariBolmeHissesi++;
     }
@@ -367,7 +392,7 @@ async function whatsappOxu(metn, faylAdi = "WhatsApp Çatı", mediaMap = {}) {
       son_tarix: sonTarix,
       pasport
     },
-    xam_metn: mesajlar.slice(0, 800).map(m => `[${m.tarix}] ${m.gonderen}: ${m.metn}`).join("\n"),
+    xam_metn: mesajlar.slice(0, 5000).map(m => `[${m.tarix}] ${m.gonderen}: ${m.metn}`).join("\n"),
     parcalar
   };
 }
@@ -440,7 +465,7 @@ async function telegramJsonOxu(jsonStr, faylAdi = "Telegram Çatı", mediaMap = 
   const ilkTarix = mesajlar[0]?.tarix || "";
   const sonTarix = mesajlar[mesajlar.length - 1]?.tarix || "";
   const kimler = Array.from(istirakcilar);
-  const tamMetn = mesajlar.slice(0, 800).map(m => `[${m.tarix}] ${m.gonderen}: ${m.metn}`).join("\n");
+  const tamMetn = mesajlar.slice(0, 5000).map(m => `[${m.tarix}] ${m.gonderen}: ${m.metn}`).join("\n");
 
   return {
     nov: "telegram",
@@ -461,8 +486,61 @@ async function telegramJsonOxu(jsonStr, faylAdi = "Telegram Çatı", mediaMap = 
   };
 }
 
-// ---- 5. Söhbət Pəncərəsi Qurucusu (Conversation Windowing) ----
-function sohbetPenceresiYarat(mesajlar, catAdi = "Söhbət") {
+// ---- 5. Ağıllı Çat Süzgəci və Praktiki Təcrübə Çıxarıcısı ----
+const muhasibatlikAcarlari = /(?:qaimə|qaime|ədv|evezles|vergi|bəyannamə|beyanname|kameral|hesab|əmək\s*haqqı|emek\s*haqqi|maaş|məzuniyyət|mezuniyyet|xəbərdarlıq|xitam|dövriyyə|dovriyye|pos|e-taxes|btp|gəlir\s*vergisi|mənfəət|menfeet|sadələşdirilmiş|sadeləşdirilmiş|cərimə|cerime|sanksiya|müfəttiş|mufettis|yoxlama|akt|hesab-faktura|idxal|ixrac|gömrük|gomruk|əsas\s*vəsait|esas\s*vesait|amortizasiya|subyekt|depozit|şhv|shv|şəxsi\s*hesab|1c|mühasib|muhasib|kassa|avans|dividend|royalti|faktiki|rüsum|məsuliyyət|lisenziya)/i;
+
+const zibilSozler = [
+  "salam", "aleykum", "əleyküm", "necəsiz", "necəsiniz", "hər kəsə", "hamıya", "dostlar", "həmkarlar",
+  "sabahınız xeyir", "hər vaxtınız xeyir", "axşamınız xeyir", "günortanız xeyir", "gecəniz xeyrə",
+  "çox sağ olun", "sağ olun", "sağolun", "təşəkkür", "təşəkkürlər", "edirəm", "edirik", "minnətdaram",
+  "dəyməz", "buyurun", "xoşdur", "yaxşıyam", "yaxşı", "siz necəsiz", "şükür", "bəli", "xeyr",
+  "ok", "aha", "hə", "yox", "+1", "anladım", "aydındır", "başa düşdüm", "təbriklər", "mübarək",
+  "inşallah", "maşallah", "amin", "uğurlar", "xahiş edirəm", "zəhmət olmasa", "gözləyirəm"
+];
+
+function chatZibilleriniTemizle(mesajlar = []) {
+  const sistemRegex = /^(?:pinned a message|changed the group|joined the group|left the group|daxil oldu|qrupdan çıxdı|mesaj bərkidildi|<attached:|<media omitted>|photo|sticker|audio omitted|voice omitted)/i;
+  const spamRegex = /(?:vakansiya|iş axtarıram|satılır|kirayə verilir|qoşulun|instagram\.com|tiktok\.com|t\.me\/(?!(?:c\/|joinchat\/)))/i;
+
+  const temiz = [];
+  for (const m of mesajlar) {
+    const txt = String(m.metn || "").trim();
+    if (!txt || txt.length < 4) continue;
+    if (sistemRegex.test(txt)) continue;
+    if (txt.length < 70 && spamRegex.test(txt)) continue;
+
+    // Əgər vergi/mühasibatlıq açar sözü varsa, mütləq saxla
+    if (muhasibatlikAcarlari.test(txt)) {
+      temiz.push(m);
+      continue;
+    }
+
+    // Əgər mesaj uzundursa (>120 hərf), potensial faydalı fikirdir, saxla
+    if (txt.length > 120) {
+      temiz.push(m);
+      continue;
+    }
+
+    // Qısa mesajlarda salam-sağol təmizliyi
+    const normalize = txt.toLowerCase().replace(/[!.,?🌸🙏😊👍👋]/g, " ").trim();
+    let qalan = normalize;
+    for (const s of zibilSozler) {
+      qalan = qalan.replaceAll(s, " ").trim();
+    }
+    qalan = qalan.replace(/[\s\d_+-]+/g, "").trim();
+
+    // Əgər mətndəki bütün sözlər zibil sözlər siyahısındadırsa, at!
+    if (qalan.length === 0) continue;
+
+    temiz.push(m);
+  }
+  return temiz;
+}
+
+function sohbetPenceresiYarat(xamMesajlar, catAdi = "Söhbət") {
+  // 1. Əvvəlcə 85% boş salam-sağol, stiker və spam mesajları təmizlə
+  const mesajlar = chatZibilleriniTemizle(xamMesajlar);
+
   const parcalar = [];
   let cariBlok = [];
   let cariUzunluq = 0;
@@ -479,12 +557,23 @@ function sohbetPenceresiYarat(mesajlar, catAdi = "Söhbət") {
       .map(m => `[${m.tarix}] ${m.gonderen}: ${m.metn}`)
       .join("\n");
 
+    // Əgər blokda peşəkar vergi/mühasibatlıq müzakirəsi varsa, xüsusi "Praktiki Keys" başlığı ver
+    const muhasibatliqVar = muhasibatlikAcarlari.test(blokMetn);
+    let basliq = `${catAdi} (${tarixAralighi})`;
+
+    if (muhasibatliqVar) {
+      const ilkSual = cariBlok.find(m => m.metn.includes("?") || muhasibatlikAcarlari.test(m.metn));
+      const movzuQisa = ilkSual ? ilkSual.metn.slice(0, 55).replace(/\n/g, " ").trim() : catAdi;
+      basliq = `💼 Praktiki Keys: ${movzuQisa}`;
+    }
+
     parcalar.push({
-      basliq: `${catAdi} (${tarixAralighi})`,
+      basliq,
       metn: blokMetn,
       gonderen: kimSiyahisi,
       tarix: ilkTarix,
       meta: {
+        praktika: muhasibatliqVar,
         mesaj_sayi: cariBlok.length,
         ilk_tarix: ilkTarix,
         son_tarix: sonTarix,
@@ -496,28 +585,23 @@ function sohbetPenceresiYarat(mesajlar, catAdi = "Söhbət") {
     cariBlok = [...ustUste];
     cariUzunluq = cariBlok.reduce((c, m) => c + m.metn.length + 30, 0);
     cariKimler = new Set(cariBlok.map(m => m.gonderen));
+    yeniMesajElaveOlundu = false;
   }
 
+  let yeniMesajElaveOlundu = false;
   for (const m of mesajlar) {
     cariBlok.push(m);
     cariUzunluq += m.metn.length + 30;
     cariKimler.add(m.gonderen);
+    yeniMesajElaveOlundu = true;
 
-    if (cariBlok.length >= 18 || cariUzunluq >= 1500) {
+    if (cariBlok.length >= 12 || cariUzunluq >= 1200) {
       blokuElaveEt();
     }
   }
 
-  if (cariBlok.length > 0 && (parcalar.length === 0 || cariBlok.length > 2)) {
-    const ilkTarix = cariBlok[0].tarix;
-    const kimSiyahisi = Array.from(cariKimler).join(", ");
-    parcalar.push({
-      basliq: `${catAdi} (${ilkTarix})`,
-      metn: cariBlok.map(m => `[${m.tarix}] ${m.gonderen}: ${m.metn}`).join("\n"),
-      gonderen: kimSiyahisi,
-      tarix: ilkTarix,
-      meta: { mesaj_sayi: cariBlok.length, istirakcilar: Array.from(cariKimler) }
-    });
+  if (cariBlok.length > 0 && yeniMesajElaveOlundu) {
+    blokuElaveEt();
   }
 
   return parcalar;
@@ -982,6 +1066,8 @@ async function faylEmalEt({ buffer, faylAdi, mimeType = "" }) {
 module.exports = {
   senedPasportuCixar,
   nlmZibilleriniTemizle,
+  chatZibilleriniTemizle,
+  sohbetPenceresiYarat,
   zipAc,
   metniParcala,
   whatsappOxu,

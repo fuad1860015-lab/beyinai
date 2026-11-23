@@ -24,6 +24,9 @@
       <button class="derin-rejim-btn aktiv" id="btnDerinRejim" title="Dərin Təhlil və Parçaları Birləşdirmə Rejimi (Klikləyərək Sürətli/Dərin rejim arasında keçid edin)">
         🧠 Dərin Təhlil
       </button>
+      <button class="temizle-ikon-btn" id="btnSohbetEndir" title="Bütün söhbət tarixçəsini hesabat kimi endir (.md)">
+        📥 Söhbəti Endir
+      </button>
       <button class="temizle-ikon-btn" id="btnSohbetTemizle" title="Söhbəti təmizlə">
         🗑️ Təmizlə
       </button>
@@ -41,8 +44,6 @@
     <div style="display:none;" id="statistikaLent">
       <span id="statQovluq">0</span><span id="statMenbe">0</span><span id="statParca">0</span><span id="statYaddas">0</span>
       <button id="btnDemoYukle"></button><button id="btnBaglantilar"><span id="canliNoqte"></span></button>
-      <button id="btnFiltrToggle"></button>
-      <div id="filtrAcilanPanel"><select id="filtrGonderen"><option value=""></option></select><select id="filtrNov"><option value=""></option></select><input type="date" id="filtrTarixBaslangic"/><input type="date" id="filtrTarixSon"/></div>
     </div>
   </header>
 
@@ -100,8 +101,36 @@
       <!-- Çat Mesajları -->
       <div class="sohbet-axini" id="sohbetAxini"></div>
 
-      <!-- Sual Daxiletmə Paneli (Müasir Minimalist) -->
+      <!-- Sual Daxiletmə Paneli (Müasir Minimalist + Sürətli Analitik Çiplər və Filtr) -->
       <div class="sual-qabi">
+        <div class="sual-ust-aletler" style="max-width:820px; margin:0 auto 8px auto; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px;">
+          <div style="display:flex; flex-wrap:wrap; gap:5px;">
+            <button type="button" class="analiz-cip novbeti-sual-cip" data-sual="Yüklənmiş bütün sənədlərin əsas məğzini və nəticələri maddələrlə xülasə et.">📋 Tam Xülasə</button>
+            <button type="button" class="analiz-cip novbeti-sual-cip" data-sual="Bütün mənbələrdə keçən rəqəmləri, məbləğləri, vergi dərəcələrini və limitləri çıxar.">💰 Rəqəmlər və Vergi</button>
+            <button type="button" class="analiz-cip novbeti-sual-cip" data-sual="Bütün tapşırıqları, öhdəlikləri, müddətləri və son tarixləri (deadline) siyahıla.">✅ Tapşırıqlar və Müddətlər</button>
+            <button type="button" class="analiz-cip novbeti-sual-cip" data-sual="Sənədlərdəki və ya çatlardakı praktiki keysləri və şəxslərin mövqeyini təhlil et.">💼 Praktiki Keyslər</button>
+          </div>
+          <button type="button" id="btnFiltrToggle" class="novbeti-sual-cip" title="Axtarış filtrlərini aç/bağla">🌪️ Filtr</button>
+        </div>
+
+        <div id="filtrAcilanPanel" hidden style="max-width:820px; margin:0 auto 8px auto; display:flex; flex-wrap:wrap; gap:8px; background:var(--bg-panel); border:1px solid var(--serhed); padding:8px 12px; border-radius:8px; font-size:12px;">
+          <select id="filtrGonderen" style="background:var(--bg-input); color:var(--metn-esas); border:1px solid var(--serhed); border-radius:6px; padding:4px 8px;">
+            <option value="">Bütün şəxslər</option>
+          </select>
+          <select id="filtrNov" style="background:var(--bg-input); color:var(--metn-esas); border:1px solid var(--serhed); border-radius:6px; padding:4px 8px;">
+            <option value="">Bütün sənəd növləri</option>
+            <option value="pdf">📕 PDF</option>
+            <option value="docx">📘 Word (.docx)</option>
+            <option value="xlsx">📗 Excel (.xlsx)</option>
+            <option value="qeyd">📝 Qeyd</option>
+            <option value="whatsapp">🟢 WhatsApp</option>
+            <option value="telegram">🔵 Telegram</option>
+            <option value="link">🔗 Veb Link</option>
+          </select>
+          <input type="date" id="filtrTarixBaslangic" title="Başlanğıc tarix" style="background:var(--bg-input); color:var(--metn-esas); border:1px solid var(--serhed); border-radius:6px; padding:4px 8px;" />
+          <input type="date" id="filtrTarixSon" title="Son tarix" style="background:var(--bg-input); color:var(--metn-esas); border:1px solid var(--serhed); border-radius:6px; padding:4px 8px;" />
+        </div>
+
         <form class="sual-formu" id="sualFormu">
           <button type="button" class="ses-duyme" id="btnSesliGiris" title="Səslə daxil et (Danışın)">
             🎙️
@@ -128,19 +157,28 @@
         <button class="panel-bagla-btn" id="btnPanelBagla" title="Paneli gizlət">✕</button>
       </div>
 
-      <!-- TAB 1: Sitat və Mənbə Baxışı -->
+      <!-- TAB 1: Sitat və Mənbə Baxışı + Qlobal Baza Axtarışı -->
       <div class="sag-tab-mezmun aktiv" id="sitatTab">
+        <div class="daxili-axtaris-qutu" style="padding:10px 12px 4px 12px; border-bottom:1px solid var(--serhed);">
+          <input
+            type="text"
+            id="globalBazaAxtaris"
+            placeholder="🔍 Bütün bazada maddə / bənd / söz axtar (məs: 102.1.30, 175.8, POS)..."
+            style="width:100%; background:var(--bg-input); color:var(--metn-esas); border:1px solid var(--serhed); border-radius:8px; padding:7px 10px; font-size:12px;"
+          />
+        </div>
+        <div id="globalAxtarisNeticeleri" hidden style="padding:10px 12px; border-bottom:1px solid var(--serhed); max-height:320px; overflow-y:auto;"></div>
         <div id="sitatOnizlemeQutusu" class="sitat-onizleme-bos">
           <div class="bos-ikon">🔍</div>
           <h3>Mənbə və Sitat Baxışı</h3>
-          <p>Cavablardakı sitatlara və ya sol tərəfdəki sənədlərə kliklədikdə onların mətni burada görünəcək.</p>
+          <p>Yuxarıdakı axtarış qutusundan bütün bazada maddə axtara və ya cavablardakı sitatlara klikləyə bilərsiniz.</p>
         </div>
       </div>
 
       <!-- TAB 2: Şəxsi Yaddaş -->
       <div class="sag-tab-mezmun" id="yaddasTab">
         <form class="yaddas-elave-form" id="yaddasForm">
-          <div class="yaddas-form-ust">
+          <div class="yaddas-form-ust" style="display:flex; gap:6px; align-items:center;">
             <select id="yaddasKat">
               <option value="fakt">📌 Fakt</option>
               <option value="qayda">⚙️ Qayda</option>
@@ -148,6 +186,7 @@
               <option value="şəxs">👤 Şəxs</option>
             </select>
             <button type="submit" class="kicik-duyme esas">+ Əlavə et</button>
+            <button type="button" class="kicik-duyme" id="btnYaddasEndir" title="Öyrədilmiş bütün Qızıl Qaydaları kompüterə endir (.md)" style="background:rgba(56,189,248,0.12); color:#38bdf8; border:1px solid rgba(56,189,248,0.3);">📥 Yedəklə</button>
           </div>
           <input type="text" id="yaddasMetn" placeholder="Məs: Həmişə 18% ƏDV-ni ayrıca göstər..." required />
         </form>
@@ -172,23 +211,39 @@
             <option value="ollama">Lokal Ollama</option>
           </select>
         </div>
-        <div class="form-qrup">
-          <label>Gemini API Key:</label>
-          <input type="password" id="tenzGeminiKey" placeholder="AIzaSy..." />
+        <div id="qrupGemini">
+          <div class="form-qrup">
+            <label>Gemini API Key (Google AI Studio — "AIzaSy..." ilə başlayır):</label>
+            <input type="password" id="tenzGeminiKey" placeholder="AIzaSy..." />
+          </div>
+          <div class="form-qrup" style="margin-top:8px;">
+            <label>Gemini Model:</label>
+            <input type="text" id="tenzGeminiModel" placeholder="gemini-3-flash-preview" />
+          </div>
         </div>
-        <div class="form-qrup">
-          <label>Model:</label>
-          <input type="text" id="tenzGeminiModel" placeholder="gemini-3-flash-preview" />
+        <div id="qrupGroq" style="display:none;">
+          <div class="form-qrup">
+            <label>Groq API Key ("gsk_..." ilə başlayır):</label>
+            <input type="password" id="tenzGroqKey" placeholder="gsk_..." />
+          </div>
+          <div class="form-qrup" style="margin-top:8px;">
+            <label>Groq Model:</label>
+            <input type="text" id="tenzGroqModel" placeholder="llama-3.3-70b-versatile" />
+          </div>
+        </div>
+        <div id="qrupOllama" style="display:none;">
+          <div class="form-qrup">
+            <label>Lokal Ollama Ünvanı (URL):</label>
+            <input type="text" id="tenzOllamaUrl" placeholder="http://127.0.0.1:11434" />
+          </div>
+          <div class="form-qrup" style="margin-top:8px;">
+            <label>Ollama Model:</label>
+            <input type="text" id="tenzOllamaModel" placeholder="llama3.2" />
+          </div>
         </div>
         <div class="form-qrup">
           <label>📱 Telegram Bot Token (Mobil İkinci Beyin):</label>
           <input type="password" id="tenzTgToken" placeholder="BotFather-dən alınan token (123456:ABC...)" />
-        </div>
-        <div style="display:none;">
-          <input type="password" id="tenzGroqKey" />
-          <input type="text" id="tenzGroqModel" />
-          <input type="text" id="tenzOllamaUrl" />
-          <input type="text" id="tenzOllamaModel" />
         </div>
         <div class="form-qrup">
           <label>Sistem Təlimatı:</label>
@@ -239,10 +294,8 @@
   <!-- Gizli Köməkçilər -->
   <div id="bildirisQutusu" class="bildiris-qutusu" hidden></div>
   <div id="modalBaglantilar" hidden><input type="text" id="bagTgToken" /><button id="btnTgQos"></button><span id="tgStatusEtiket"></span><span id="nlmKorpuStatusEtiket"></span><button id="btnBookmarkletKopyala"></button><a id="wpBookmarkletLink" href="#"></a><div id="tgMelumatQutusu"></div></div>
-  <div id="onizlemeParcalarSiyahisi" style="display:none;"></div>
-  <input type="text" id="menbeDaxiliAxtaris" style="display:none;" />
 
-  <script src="/app.js?v=3.3"></script>
+  <script src="/app.js?v=3.4"></script>
   <script>
     document.addEventListener("DOMContentLoaded", () => {
       const btnToggle = document.getElementById("btnPanelToggle");

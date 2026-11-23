@@ -123,8 +123,10 @@ function ustPanelDurumYenile() {
     etiket.textContent = `Ollama (${t.ollama_model || "Lokal"})`;
   } else if (t.ai_provayder === "groq" && t.groq_api_key) {
     etiket.textContent = "Groq AI ✓";
-  } else if (t.gemini_api_key) {
+  } else if (t.gemini_api_key && t.gemini_api_key.trim().startsWith("AIza")) {
     etiket.textContent = derinAktiv ? "Gemini 3 • Dərin Zəka ✓" : "Gemini 3 • Sürətli ✓";
+  } else if (t.gemini_api_key) {
+    etiket.textContent = "Gemini • Açar Yanlışdır ⚠️";
   } else {
     etiket.textContent = "Pulsuz Bulud AI (Aktiv ✓)";
   }
@@ -154,15 +156,22 @@ function qovluqlariCiz() {
     </div>
   `;
 
+  const sistemQovluqlari = new Set(["qovluq-is", "qovluq-praktika", "qovluq-cat", "qovluq-sexsi"]);
   for (const q of veziyyet.qovluqlar) {
     const aktiv = veziyyet.aktivQovluq === q.id ? "aktiv" : "";
+    const silDuyme = !sistemQovluqlari.has(q.id)
+      ? `<button type="button" class="menbe-sil-duyme qovluq-sil-duyme" data-qovluq-sil="${htmlQoru(q.id)}" title="Qovluğu sil">✕</button>`
+      : "";
     html += `
       <div class="qovluq-element ${aktiv}" data-qovluq="${htmlQoru(q.id)}">
         <div class="qovluq-sol">
           <span>${htmlQoru(q.ikon || "📁")}</span>
           <span>${htmlQoru(q.ad)}</span>
         </div>
-        <span class="qovluq-say">${q.menbe_sayi || 0}</span>
+        <div style="display:flex; align-items:center; gap:4px;">
+          <span class="qovluq-say">${q.menbe_sayi || 0}</span>
+          ${silDuyme}
+        </div>
       </div>
     `;
   }
@@ -178,9 +187,25 @@ function qovluqlariCiz() {
   }
 
   qutu.querySelectorAll(".qovluq-element").forEach(el => {
-    el.addEventListener("click", () => {
+    el.addEventListener("click", e => {
+      if (e.target.classList.contains("qovluq-sil-duyme")) return;
       veziyyet.aktivQovluq = el.getAttribute("data-qovluq");
       melumatlariYenile();
+    });
+  });
+
+  qutu.querySelectorAll(".qovluq-sil-duyme").forEach(btn => {
+    btn.addEventListener("click", async e => {
+      e.stopPropagation();
+      const id = btn.getAttribute("data-qovluq-sil");
+      try {
+        await apiSorgu(`/api/qovluqlar/${encodeURIComponent(id)}`, "DELETE");
+        if (veziyyet.aktivQovluq === id) veziyyet.aktivQovluq = "all";
+        bildirisGoster("🗑️ Qovluq silindi (içindəki sənədlər 'İş və Mühasibatlıq' qovluğuna köçürüldü)");
+        melumatlariYenile();
+      } catch (err) {
+        bildirisGoster("⚠️ " + err.message);
+      }
     });
   });
 }
@@ -528,9 +553,10 @@ function sohbetleriCiz() {
             ${gosterilecekSitatlar.slice(0, 6).map(s => {
               const ikon = NOV_IKONLARI[s.menbe_novu] || "📄";
               const basliqEtiket = (s.basliq && !s.basliq.includes("— Hissə"))
-                ? s.basliq.slice(0, 32)
+                ? s.basliq.slice(0, 36)
                 : s.menbe_adi.slice(0, 24);
-              return `<button type="button" class="sitat-heb" title="${htmlQoru(s.menbe_adi + " | " + (s.basliq || ""))}" data-menbe-id="${htmlQoru(s.menbe_id)}" data-parca-id="${htmlQoru(s.parca_id)}">${ikon} [${s.nomre}] ${htmlQoru(basliqEtiket)}</button>`;
+              const huquqIpucu = s.huquqi_etiket ? ` (${s.huquqi_etiket})` : "";
+              return `<button type="button" class="sitat-heb" title="${htmlQoru(s.menbe_adi + " | " + (s.basliq || "") + huquqIpucu)}" data-menbe-id="${htmlQoru(s.menbe_id)}" data-parca-id="${htmlQoru(s.parca_id)}">${ikon} [${s.nomre}] ${htmlQoru(basliqEtiket)}</button>`;
             }).join("")}
           </div>
         `;
@@ -540,26 +566,58 @@ function sohbetleriCiz() {
     let aletlerHtml = "";
     if (m.rol === "assistant" && !m.gozleyir) {
       aletlerHtml = `
-        <div class="mesaj-aletler">
-          <button type="button" class="mesaj-alet-duyme vurqulu" data-etrafli="${idx}">🔍 Ətraflı İzah İstə</button>
+        <div class="mesaj-aletler" style="flex-wrap:wrap;">
+          <button type="button" class="mesaj-alet-duyme vurqulu" data-oyren-tesdiq="${idx}" title="Bu cavabı təsdiqləyərək Mühasibatlıq Təcrübə Bankına etalon keys kimi əlavə et">👍 Doğrudur (Təcrübə Bankına Qat)</button>
+          <button type="button" class="mesaj-alet-duyme" data-oyren-duzelis="${idx}" title="Səhvi düzəldərək sistemə yeni Qızıl Qayda öyrət" style="border-color:rgba(245,158,11,0.35)!important; color:#fcd34d!important;">🎯 Düzəliş Öyrət</button>
+          <button type="button" class="mesaj-alet-duyme" data-yeniden="${idx}" title="Bu sualı yenidən cavablandır">🔄 Yenidən Cavabla</button>
+          <button type="button" class="mesaj-alet-duyme" data-etrafli="${idx}">🔍 Ətraflı İzah</button>
           <button type="button" class="mesaj-alet-duyme" data-kopyala="${idx}">📋 Kopyala</button>
           <button type="button" class="mesaj-alet-duyme" data-seslendir="${idx}">🔊 Səsləndir</button>
-          <button type="button" class="mesaj-alet-duyme" data-yaddas-saxla="${idx}">📌 Yaddaşa Saxla</button>
-          <button type="button" class="mesaj-alet-duyme" data-endir="${idx}">📥 Hesabatı Endir (.md)</button>
+          <button type="button" class="mesaj-alet-duyme" data-endir="${idx}">📥 Endir (.md)</button>
         </div>
       `;
     }
 
+    // Etibarlılıq dərəcəsini və Bilik Boşluğunu düşünmə addımlarından çıxar
+    let etibarliliqBadge = "";
+    let bilikBosluguBanner = "";
+    if (m.rol === "assistant" && Array.isArray(dusunme)) {
+      const etibSetir = dusunme.find(d => d.includes("Etibarlılıq:"));
+      if (etibSetir) {
+        const temizEtib = etibSetir.replace(/^.*Etibarlılıq:\s*\*\*/i, "").replace(/\*\*.*$/, "").trim();
+        const isBosluq = temizEtib.includes("🔴") || temizEtib.includes("Bilik Boşluğu");
+        const isOrta = temizEtib.includes("🟡");
+        const bg = isBosluq
+          ? "rgba(239,68,68,0.14)"
+          : (isOrta ? "rgba(245,158,11,0.14)" : "rgba(16,185,129,0.12)");
+        const fg = isBosluq ? "#fca5a5" : (isOrta ? "#fcd34d" : "#6ee7b7");
+        const brd = isBosluq
+          ? "rgba(239,68,68,0.35)"
+          : (isOrta ? "rgba(245,158,11,0.32)" : "rgba(16,185,129,0.28)");
+        etibarliliqBadge = `<span style="font-size:10.5px; padding:1px 7px; border-radius:99px; background:${bg}; color:${fg}; border:1px solid ${brd}; font-weight:500;">${htmlQoru(temizEtib)}</span>`;
+        if (isBosluq) {
+          bilikBosluguBanner = `
+            <div style="margin-top:8px; padding:8px 11px; border-radius:8px; background:rgba(239,68,68,0.09); border:1px dashed rgba(239,68,68,0.4); display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;">
+              <span style="font-size:11.5px; color:#fecaca;">🔴 <b>Bilik Boşluğu aşkarlandı:</b> Bu sual üzrə bazada birbaşa rəsmi maddə və ya Qızıl Qayda tapılmadı.</span>
+              <button type="button" class="kicik-duyme" data-oyren-duzelis="${idx}" style="background:rgba(245,158,11,0.2); color:#fde68a; border:1px solid rgba(245,158,11,0.45); font-size:11px; cursor:pointer;">🎯 Bu mövzunu Sistemə Öyrət</button>
+            </div>
+          `;
+        }
+      }
+    }
+
     return `
       <div class="mesaj-qutu ${m.rol}">
-        <div class="mesaj-basliq">
+        <div class="mesaj-basliq" style="flex-wrap:wrap;">
           <span>${rolAdi}</span>
+          ${etibarliliqBadge}
           <span>${vaxt}</span>
         </div>
         ${dusunmeHtml}
         <div class="mesaj-icerik">
           ${markdownFormatla(m.metn, sitatlar)}
         </div>
+        ${bilikBosluguBanner}
         ${altSitatlarHtml}
         ${aletlerHtml}
       </div>
@@ -584,7 +642,24 @@ function sohbetleriCiz() {
     });
   });
 
-  // Mesaj alətləri (Ətraflı İzah, Kopyala, Səsləndir, Yaddaşa Saxla, Endir)
+  // Mesaj alətləri (Yenidən Cavabla, Ətraflı İzah, Kopyala, Səsləndir, Yaddaşa Saxla, Endir)
+  qutu.querySelectorAll("[data-yeniden]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const idx = Number(btn.getAttribute("data-yeniden"));
+      let sual = "";
+      for (let i = idx - 1; i >= 0; i--) {
+        if (veziyyet.sohbetler[i]?.rol === "user") {
+          sual = veziyyet.sohbetler[i].metn;
+          break;
+        }
+      }
+      if (sual) {
+        bildirisGoster("🔄 Sual yenidən cavablandırılır...");
+        sualGonder(sual);
+      }
+    });
+  });
+
   qutu.querySelectorAll("[data-etrafli]").forEach(btn => {
     btn.addEventListener("click", () => {
       sualGonder("Yuxarıdakı cavabı ən xırda detallarına qədər, bütün maddələr, istisnalar və praktiki keyslərlə geniş və dərindən izah et.");
@@ -618,19 +693,67 @@ function sohbetleriCiz() {
     });
   });
 
-  qutu.querySelectorAll("[data-yaddas-saxla]").forEach(btn => {
+  // Özü-Öyrənmə: 👍 Cavabı Təsdiqlə (Təcrübə Bankına Qat)
+  qutu.querySelectorAll("[data-oyren-tesdiq]").forEach(btn => {
     btn.addEventListener("click", async () => {
-      const m = veziyyet.sohbetler[Number(btn.getAttribute("data-yaddas-saxla"))];
+      const idx = Number(btn.getAttribute("data-oyren-tesdiq"));
+      const m = veziyyet.sohbetler[idx];
       if (!m) return;
-      const qisa = teqleriTemizle(m.metn).replace(/[#*>]/g, "").trim().slice(0, 260);
-      await apiSorgu("/api/yaddas", "POST", {
-        kateqoriya: "fakt",
-        metn: qisa,
-        menbe: "Söhbət Analizi",
-        vaciblik: 4
-      });
-      bildirisGoster("📌 Cavabın xülasəsi Şəxsi Yaddaşa əlavə olundu!");
-      melumatlariYenile();
+      let sual = "";
+      for (let i = idx - 1; i >= 0; i--) {
+        if (veziyyet.sohbetler[i]?.rol === "user") {
+          sual = veziyyet.sohbetler[i].metn;
+          break;
+        }
+      }
+      btn.disabled = true;
+      btn.textContent = "✅ Təcrübə Bankına Əlavə Edildi";
+      try {
+        await apiSorgu("/api/oyren", "POST", {
+          nov: "tesdiq",
+          sual,
+          cavab: teqleriTemizle(m.metn)
+        });
+        bildirisGoster("💼 Cavab etalon praktiki keys kimi 'Mühasibatlıq Praktikası və Təcrübə Bankı'na əlavə olundu!");
+        melumatlariYenile();
+      } catch (err) {
+        bildirisGoster("⚠️ " + err.message);
+      }
+    });
+  });
+
+  // Özü-Öyrənmə: 🎯 Ekspert Düzəlişi Öyrət (Qızıl Qayda + Praktiki Keys)
+  qutu.querySelectorAll("[data-oyren-duzelis]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const idx = Number(btn.getAttribute("data-oyren-duzelis"));
+      const m = veziyyet.sohbetler[idx];
+      if (!m) return;
+      let sual = "";
+      for (let i = idx - 1; i >= 0; i--) {
+        if (veziyyet.sohbetler[i]?.rol === "user") {
+          sual = veziyyet.sohbetler[i].metn;
+          break;
+        }
+      }
+      const duzelis = prompt(
+        `🎯 Bu sual üzrə dəqiq qaydanı və ya düzəlişinizi yazın:\n(Mövzu: "${(sual || "").slice(0, 90)}")\n\nSistem bunu həm Uzunmüddətli Qızıl Qayda, həm də Praktiki Keys kimi öyrənəcək:`,
+        ""
+      );
+      if (!duzelis || !duzelis.trim()) return;
+      try {
+        await apiSorgu("/api/oyren", "POST", {
+          nov: "duzelis",
+          sual,
+          duzelis: duzelis.trim()
+        });
+        bildirisGoster("🎯 Düzəlişiniz 'Qızıl Qayda' və 'Praktiki Keys' kimi öyrənildi! Sual yenidən cavablandırılır...");
+        await melumatlariYenile();
+        if (sual) {
+          sualGonder(sual);
+        }
+      } catch (err) {
+        bildirisGoster("⚠️ " + err.message);
+      }
     });
   });
 
@@ -758,16 +881,23 @@ async function menbeOnizlemeAc(menbeId, vurgulanacaqParcaId = null) {
     const urlMövcuddur = m.nov === "link" || m.nov === "youtube" || Boolean(m.meta?.url);
     const linkUrl = m.meta?.url || (m.ad.startsWith("http") ? m.ad : "");
 
+    const qovluqSecimHtml = `
+      <select id="onizlemeQovluqSecici" title="Sənədin yerləşdiyi qovluğu dəyiş" style="background:var(--bg-input); color:var(--metn-ikincil); border:1px solid var(--serhed); border-radius:4px; padding:2px 6px; font-size:11px; cursor:pointer;">
+        ${veziyyet.qovluqlar.map(q => `<option value="${htmlQoru(q.id)}" ${q.id === m.qovluq_id ? "selected" : ""}>${htmlQoru(q.ikon)} ${htmlQoru(q.ad)}</option>`).join("")}
+      </select>
+    `;
+
     qutu.innerHTML = `
       <div class="onizleme-basliq-kart">
         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
           <h3 style="margin:0;">${ikon} ${htmlQoru(m.ad)}</h3>
-          ${urlMövcuddur ? `
-            <div style="display:flex; gap:6px; flex-shrink:0;">
+          <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+            ${qovluqSecimHtml}
+            ${urlMövcuddur ? `
               ${linkUrl ? `<a href="${htmlQoru(linkUrl)}" target="_blank" rel="noopener noreferrer" class="menbe-aksiyon-duyme" title="Orijinal veb səhifəni aç" style="text-decoration:none; color:#38bdf8; font-size:11px; padding:3px 7px; background:rgba(56,189,248,0.1); border-radius:4px;">🌐 Sayta Get</a>` : ""}
               <button id="btnOnizlemeSinxron" class="menbe-aksiyon-duyme" title="Mənbəni canlı linkdən yenilə" style="background:rgba(56,189,248,0.1); border:none; color:#38bdf8; font-size:11px; padding:3px 7px; border-radius:4px; cursor:pointer;">🔄 Yenilə</button>
-            </div>
-          ` : ""}
+            ` : ""}
+          </div>
         </div>
         <div class="onizleme-meta">${htmlQoru(m.xulase)}</div>
       </div>
@@ -777,6 +907,20 @@ async function menbeOnizlemeAc(menbeId, vurgulanacaqParcaId = null) {
       </div>
       <div id="onizlemeParcalarSiyahisi" style="display:flex; flex-direction:column; gap:10px;"></div>
     `;
+
+    const qovluqSecici = document.getElementById("onizlemeQovluqSecici");
+    if (qovluqSecici) {
+      qovluqSecici.addEventListener("change", async () => {
+        const yeniQovluq = qovluqSecici.value;
+        try {
+          await apiSorgu(`/api/menbeler/${encodeURIComponent(m.id)}`, "PUT", { qovluq_id: yeniQovluq });
+          bildirisGoster("📁 Sənəd seçilmiş qovluğa köçürüldü!");
+          await melumatlariYenile();
+        } catch (err) {
+          bildirisGoster("⚠️ " + err.message);
+        }
+      });
+    }
 
     const btnOnizSinx = document.getElementById("btnOnizlemeSinxron");
     if (btnOnizSinx) {
@@ -838,11 +982,30 @@ function yaddasCiz() {
     <div class="yaddas-kart">
       <div class="yaddas-kart-ust">
         <span>[${htmlQoru(y.kateqoriya)}] • ${htmlQoru(y.menbe)}</span>
-        <button class="menbe-sil-duyme" data-yad-sil="${htmlQoru(y.id)}" title="Yaddaşdan sil">✕</button>
+        <div style="display:flex; align-items:center; gap:4px;">
+          <button class="menbe-sil-duyme" data-yad-redakte="${htmlQoru(y.id)}" title="Qaydanı redaktə et" style="color:#38bdf8;">✏️</button>
+          <button class="menbe-sil-duyme" data-yad-sil="${htmlQoru(y.id)}" title="Yaddaşdan sil">✕</button>
+        </div>
       </div>
       <div>${htmlQoru(y.metn)}</div>
     </div>
   `).join("");
+
+  qutu.querySelectorAll("[data-yad-redakte]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const id = btn.getAttribute("data-yad-redakte");
+      const cari = veziyyet.yaddas.find(x => x.id === id);
+      if (!cari) return;
+      const yeniMetn = prompt("✏️ Yaddaş qaydasını redaktə edin:", cari.metn);
+      if (!yeniMetn || !yeniMetn.trim() || yeniMetn.trim() === cari.metn) return;
+      await apiSorgu(`/api/yaddas/${encodeURIComponent(id)}`, "PUT", {
+        kateqoriya: cari.kateqoriya,
+        metn: yeniMetn.trim()
+      });
+      bildirisGoster("✏️ Yaddaş qaydası yeniləndi!");
+      melumatlariYenile();
+    });
+  });
 
   qutu.querySelectorAll("[data-yad-sil]").forEach(btn => {
     btn.addEventListener("click", async () => {
@@ -1182,6 +1345,86 @@ document.addEventListener("DOMContentLoaded", () => {
     melumatlariYenile();
   });
 
+  document.getElementById("btnSohbetEndir")?.addEventListener("click", () => {
+    const mesajlar = veziyyet.sohbetler || [];
+    if (mesajlar.length === 0) {
+      bildirisGoster("ℹ️ Endiriləcək söhbət tarixçəsi yoxdur.");
+      return;
+    }
+    const mdHisseler = [
+      `# 🧠 BeyinAI — Konsultasiya və Sual-Cavab Hesabatı`,
+      `Tarix: ${new Date().toLocaleString("az-AZ")}`,
+      `Qovluq: ${veziyyet.aktivQovluq}\n`,
+      ...mesajlar.map(m => {
+        const kim = m.rol === "user" ? "## 👤 Sual" : "## 🧠 BeyinAI Cavabı";
+        const vaxt = m.yaradildi ? `_(${new Date(m.yaradildi).toLocaleString("az-AZ")})_` : "";
+        return `${kim} ${vaxt}\n\n${teqleriTemizle(m.metn || "")}`;
+      })
+    ];
+    const blob = new Blob([mdHisseler.join("\n\n---\n\n")], { type: "text/markdown;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `BeyinAI_Sohbet_Hesabati_${new Date().toISOString().slice(0, 10)}.md`;
+    a.click();
+    bildirisGoster("📥 Bütün söhbət tarixçəsi (.md) hesabat kimi endirildi!");
+  });
+
+  // Bütün Bazada Ani Maddə və Açar Söz Axtarışı (<10ms)
+  let globalAxtarisTaymer = null;
+  const globalInput = document.getElementById("globalBazaAxtaris");
+  const globalNeticeQutu = document.getElementById("globalAxtarisNeticeleri");
+  if (globalInput && globalNeticeQutu) {
+    globalInput.addEventListener("input", () => {
+      clearTimeout(globalAxtarisTaymer);
+      const q = globalInput.value.trim();
+      if (!q) {
+        globalNeticeQutu.hidden = true;
+        globalNeticeQutu.innerHTML = "";
+        return;
+      }
+      globalAxtarisTaymer = setTimeout(async () => {
+        try {
+          const url = `/api/axtar?q=${encodeURIComponent(q)}&qovluq_id=${encodeURIComponent(veziyyet.aktivQovluq || "all")}`;
+          const cav = await apiSorgu(url, "GET");
+          const siyahı = cav.neticeler || [];
+          globalNeticeQutu.hidden = false;
+          if (siyahı.length === 0) {
+            globalNeticeQutu.innerHTML = `<div style="font-size:12px; color:var(--metn-solgun); padding:6px;">"${htmlQoru(q)}" üzrə bazada uyğun maddə və ya parça tapılmadı.</div>`;
+            return;
+          }
+          globalNeticeQutu.innerHTML = `
+            <div style="font-size:11px; color:var(--metn-solgun); margin-bottom:6px; display:flex; justify-content:space-between;">
+              <span>⚡ Bazada tapılan nəticələr (${siyahı.length}):</span>
+              <button type="button" id="btnGlobalAxtarisBagla" style="background:none; border:none; color:var(--metn-solgun); cursor:pointer; font-size:11px;">✕ Bağla</button>
+            </div>
+            ${siyahı.map(r => {
+              const ikon = NOV_IKONLARI[r.menbe_novu] || "📄";
+              return `
+                <div class="yaddas-kart" data-global-menbe="${htmlQoru(r.menbe_id)}" data-global-parca="${htmlQoru(r.id)}" style="cursor:pointer; margin-bottom:6px; padding:8px 10px;">
+                  <div style="font-size:11.5px; font-weight:600; color:#93c5fd; margin-bottom:3px;">${ikon} ${htmlQoru(r.menbe_adi)} — ${htmlQoru(r.basliq || "")}</div>
+                  <div style="font-size:11.5px; color:var(--metn-ikinci); line-height:1.4;">${htmlQoru(r.metn.slice(0, 180))}...</div>
+                </div>
+              `;
+            }).join("")}
+          `;
+          document.getElementById("btnGlobalAxtarisBagla")?.addEventListener("click", () => {
+            globalNeticeQutu.hidden = true;
+          });
+          globalNeticeQutu.querySelectorAll("[data-global-menbe]").forEach(el => {
+            el.addEventListener("click", () => {
+              const mId = el.getAttribute("data-global-menbe");
+              const pId = el.getAttribute("data-global-parca");
+              menbeOnizlemeAc(mId, pId);
+            });
+          });
+        } catch (err) {
+          globalNeticeQutu.hidden = false;
+          globalNeticeQutu.innerHTML = `<div style="font-size:12px; color:#fca5a5;">Axtarış xətası: ${htmlQoru(err.message)}</div>`;
+        }
+      }, 180);
+    });
+  }
+
   document.getElementById("yaddasForm").addEventListener("submit", async e => {
     e.preventDefault();
     const kateqoriya = document.getElementById("yaddasKat").value;
@@ -1196,6 +1439,26 @@ document.addEventListener("DOMContentLoaded", () => {
     metnInput.value = "";
     bildirisGoster("🧠 Şəxsi Yaddaşa əlavə olundu");
     melumatlariYenile();
+  });
+
+  document.getElementById("btnYaddasEndir")?.addEventListener("click", () => {
+    const siyahı = veziyyet.yaddas || [];
+    if (siyahı.length === 0) {
+      bildirisGoster("ℹ️ Hələ yedəklənəcək yaddaş qeydi yoxdur.");
+      return;
+    }
+    const md = [
+      `# 🧠 BeyinAI — Öyrədilmiş Qızıl Qaydalar və Uzunmüddətli Yaddaş Ehtiyat Nüsxəsi`,
+      `Tarix: ${new Date().toLocaleString("az-AZ")}`,
+      `Cəmi Qayda Sayı: ${siyahı.length}\n`,
+      ...siyahı.map((y, i) => `${i + 1}. **[${y.kateqoriya.toUpperCase()} | ${y.menbe}]** ${y.metn}`)
+    ].join("\n\n");
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `BeyinAI_Qizil_Qaydalar_${new Date().toISOString().slice(0, 10)}.md`;
+    a.click();
+    bildirisGoster("📥 Bütün öyrədilmiş Qızıl Qaydalar kompüterinizə endirildi!");
   });
 
   document.getElementById("btnDemoYukle").addEventListener("click", async () => {
@@ -1297,6 +1560,26 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  function provayderSaheleriniYenile() {
+    const p = document.getElementById("tenzProvayder")?.value || "gemini";
+    const qGemini = document.getElementById("qrupGemini");
+    const qGroq = document.getElementById("qrupGroq");
+    const qOllama = document.getElementById("qrupOllama");
+    if (qGemini) qGemini.style.display = p === "gemini" ? "block" : "none";
+    if (qGroq) qGroq.style.display = p === "groq" ? "block" : "none";
+    if (qOllama) qOllama.style.display = p === "ollama" ? "block" : "none";
+  }
+
+  document.getElementById("tenzProvayder")?.addEventListener("change", provayderSaheleriniYenile);
+
+  const btnFiltr = document.getElementById("btnFiltrToggle");
+  const filtrPanel = document.getElementById("filtrAcilanPanel");
+  if (btnFiltr && filtrPanel) {
+    btnFiltr.addEventListener("click", () => {
+      filtrPanel.hidden = !filtrPanel.hidden;
+    });
+  }
+
   document.getElementById("btnTenzimlemeler").addEventListener("click", () => {
     const t = veziyyet.tenzimlemeler;
     document.getElementById("tenzProvayder").value = t.ai_provayder || "gemini";
@@ -1309,15 +1592,18 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("tenzSistemTelimati").value = t.sistem_telimati || "";
     const tgEl = document.getElementById("tenzTgToken");
     if (tgEl) tgEl.value = t.tg_bot_token || "";
+    provayderSaheleriniYenile();
     document.getElementById("modalTenzimlemeler").hidden = false;
   });
 
   document.getElementById("formTenzimlemeler").addEventListener("submit", async e => {
     e.preventDefault();
+    const gKey = document.getElementById("tenzGeminiKey").value.trim();
+    const prov = document.getElementById("tenzProvayder").value;
     await apiSorgu("/api/tenzimlemeler", "POST", {
-      ai_provayder: document.getElementById("tenzProvayder").value,
-      gemini_api_key: document.getElementById("tenzGeminiKey").value.trim(),
-      gemini_model: document.getElementById("tenzGeminiModel").value.trim() || "gemini-2.5-flash",
+      ai_provayder: prov,
+      gemini_api_key: gKey,
+      gemini_model: document.getElementById("tenzGeminiModel").value.trim() || "gemini-3-flash-preview",
       groq_api_key: document.getElementById("tenzGroqKey").value.trim(),
       groq_model: document.getElementById("tenzGroqModel").value.trim() || "llama-3.3-70b-versatile",
       ollama_url: document.getElementById("tenzOllamaUrl").value.trim() || "http://127.0.0.1:11434",
@@ -1326,7 +1612,11 @@ document.addEventListener("DOMContentLoaded", () => {
       tg_bot_token: document.getElementById("tenzTgToken")?.value?.trim() || ""
     });
     document.getElementById("modalTenzimlemeler").hidden = true;
-    bildirisGoster("💾 AI tənzimləmələri yadda saxlanıldı!");
+    if (prov === "gemini" && gKey && !gKey.startsWith("AIza")) {
+      bildirisGoster("⚠️ Diqqət: Gemini API açarı adətən 'AIzaSy...' ilə başlayır. Açarı yoxlayın.", 5500);
+    } else {
+      bildirisGoster("💾 AI tənzimləmələri yadda saxlanıldı!");
+    }
     melumatlariYenile();
   });
 

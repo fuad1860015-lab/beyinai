@@ -65,27 +65,109 @@ function notebooklmCanliSorus(sual, timeoutMs = 28000) {
 
 // ---- AGENT ADDIM 1: Sürətli (<1ms) Lokal Morfoloji və Domen Sinonim Planlayıcısı ----
 const DOMEN_SINONIMLERI = [
-  { acar: /ləğv|legv|geri qaytar|qaytarıl|dəqiqləşdir|deqiqlesdir|köhnə ay|kohne ay|əvvəlki ay|evvelki ay|növbəti ay|novbeti ay|bəyan etdiyim/i, elave: "Maddə 163 163.1 163.2 Maddə 72.4-1 72.5 Maddə 174.2 175.5 vergi tutulan dövriyyənin dəqiqləşdirilməsi qiymətləndirmə bazasında dəyişikliyin baş verdiyi hesabat dövründə cari ayın bəyannaməsi ləğv edilmiş elektron qaimə" },
-  { acar: /əvəzləş|evezles|təsdiq|tesdiq|əsas ödəniş|esas odenis|fərqli ay|ferqli ay/i, elave: "Maddə 175 175.1 175.8 ƏDV əvəzləşdirilməsi elektron qaimə-faktura əsas ödəniş ƏDV depozit ən son hesabat dövrü fərqli aylar" },
-  { acar: /dövriyyə|dovriyye|limit|hədd|hedd/i, elave: "illik gəlir həcmi 45000 200000 manat dövriyyə" },
-  { acar: /45\s*000|45000|yetmiş beş|75\s*%|75\s*faiz/i, elave: "Maddə 102.1.30 102.1.30-1 106.1.20 fərdi mikro sahibkar 45 000 manat 75 faiz güzəşt 13 fəaliyyət sahəsi 3 işçi" },
-  { acar: /pos|terminal|kassa|nka/i, elave: "POS-terminal 219 nömrəli qərar 2000 manat rüb orta aylıq dövriyyə nağdsız Maddə 58.7" },
-  { acar: /nağd|nagd|hesablaşma|kassa limit/i, elave: "Nağdsız hesablaşmalar haqqında Qanun Maddə 3.3 3.4 30000 15000 manat aylıq nağd limit Maddə 58.7-1 1 faiz nağdlaşdırma" },
-  { acar: /cərimə|cerime|sanksiya|pozuntu|gecikmə|faiz/i, elave: "Maddə 57 58 59 maliyyə sanksiyası 40 manat 50 faiz cərimə məbləği 0.1 faiz" },
-  { acar: /qaimə|qaime|elektron qaimə|eqf/i, elave: "Maddə 71-1 175 176 elektron qaimə-faktura verilmə müddəti 5 gün təsdiqi əvəzləşdirmə Maddə 58.13" },
-  { acar: /ədv|edv|əlavə dəyər|sıfır dərəcə|ixrac/i, elave: "Maddə 155 164 165 166 175 177 ƏDV əvəzləşdirmə 18 faiz 0 faiz qeydiyyat 200000 POS 0.5 əmsal" },
-  { acar: /sadələşdirilmiş|sadelesdirilmis|topdansatış|b2b/i, elave: "Maddə 218 218.5 220 sadələşdirilmiş vergi 2 faiz 8 faiz 30 faiz həddi qadağan olunanlar" },
-  { acar: /amortizasiya|əsas vəsait|esas vesait|təmir|temir|xərc/i, elave: "Maddə 108 109 114 115 əsas vəsaitlərin amortizasiyası təmir xərci norması qalıq dəyəri 2 əmsal" },
-  { acar: /kənd|kend|təsərrüfat|teserrufat|fermer|emal/i, elave: "Maddə 13.2.60 Maddə 102.1.11 Maddə 106.1.14 164.1.18 kənd təsərrüfatı istehsal emal azadolma" },
-  { acar: /dividend|təsisçi|tesisci|icarə|icare|royalti|qeyri-rezident|ömv/i, elave: "Maddə 122 123 124 125 ödəmə mənbəyində vergi dividend 5 faiz icarə 14 faiz qeyri-rezident 10 faiz" },
-  { acar: /işçi|isci|əmək müqaviləsi|muzdlu|maaş|əməkhaqqı|sosial|mdss|its/i, elave: "Maddə 101.1 101.1-1 102 58.10 muzdlu iş 8000 manat sosial sığorta MDSS İTS 2000 manat cərimə" },
-  { acar: /kameral|səyyar|seyyar|yoxlama|uyğunsuzluq|iddia müddəti/i, elave: "Maddə 37 38 85 kameral vergi yoxlaması 30 iş günü səyyar yoxlama 3 il" },
-  { acar: /kassa metodu|hesablama metodu|avans|debitor/i, elave: "Maddə 130 131 132 166 kassa metodu hesablama metodu gəlir və xərclərin uçotu" },
-  { acar: /əmlak|emlak|torpaq|yol vergisi|mədən/i, elave: "Maddə 197 199.14 203 206 209 215 əmlak vergisi 1 faiz mikro sahibkar azadolma torpaq vergisi" }
+  // 1) ƏDV qeydiyyatının ləğvi (Maddə 158) — qaimə ləğvi ilə qarışmaması üçün xüsusi qayda
+  {
+    acar: /(?:ədv|edv)\s*qeydiyyat[ıi]n?[ıi]?n?\s*(?:ləğv|legv|çıxar|dayandır)|məcburi\s*qeydiyyat.*(?:ləğv|legv)|qeydiyyatdan\s*necə\s*çıx/i,
+    istisna: /qaimə|qaime|eqf/i,
+    elave: "Maddə 158 158.1 158.2 ƏDV qeydiyyatının ləğv edilməsi 100000 manat 1 il vergi tutulan əməliyyatların dayandırılması"
+  },
+  // 2) Köhnə ayda bəyan edilmiş qaimənin ləğvi / malın geri qaytarılması / dövriyyənin dəqiqləşdirilməsi (Maddə 163, 72.4-1, 175.5)
+  {
+    acar: /(?:qaimə|qaime|eqf|mal|əməliyyat|dövriyyə|bəyan).*(?:ləğv|legv|geri\s*qaytar|qaytarıl|dəqiqləşdir)|(?:ləğv|legv|geri\s*qaytar|qaytarıl|dəqiqləşdir).*(?:qaimə|qaime|eqf|mal|əməliyyat|dövriyyə|bəyan)|köhnə\s*ay|əvvəlki\s*ay|növbəti\s*ay|bəyan\s*etdiyim/i,
+    istisna: /əmək\s*müqavilə|ədv\s*qeydiyyat|qeydiyyatdan\s*çıx/i,
+    elave: "Maddə 163 163.1 163.2 Maddə 72.4-1 72.5 Maddə 174.2 175.5 vergi tutulan dövriyyənin dəqiqləşdirilməsi dəyişikliyin baş verdiyi hesabat dövründə cari ayın bəyannaməsi ləğv edilmiş elektron qaimə"
+  },
+  {
+    acar: /əvəzləş|evezles|əsas\s*ödəniş|esas\s*odenis|fərqli\s*ay|ferqli\s*ay|(?:qaimə|ədv).*təsdiq/i,
+    elave: "Maddə 175 175.1 175.8 ƏDV əvəzləşdirilməsi elektron qaimə-faktura əsas ödəniş ƏDV depozit ən son hesabat dövrü fərqli aylar"
+  },
+  {
+    acar: /45\s*000|45000|yetmiş\s*beş|75\s*%|75\s*faiz/i,
+    elave: "Maddə 102.1.30 102.1.30-1 106.1.20 fərdi mikro sahibkar 45 000 manat 75 faiz güzəşt 13 fəaliyyət sahəsi 3 işçi"
+  },
+  {
+    acar: /\bpos\b|terminal|kassa\s*aparat|\bnka\b/i,
+    elave: "POS-terminal 219 nömrəli qərar 2000 manat rüb orta aylıq dövriyyə nağdsız Maddə 58.7"
+  },
+  {
+    acar: /nağd\b|nagd\b|nağdsız|nağdlaşdırma|kassa\s*limit/i,
+    elave: "Nağdsız hesablaşmalar haqqında Qanun Maddə 3.3 3.4 30000 15000 manat aylıq nağd limit Maddə 58.7-1 1 faiz nağdlaşdırma"
+  },
+  {
+    acar: /cərimə|cerime|sanksiya|maliyyə\s*sanksiya|gecikmə\s*faiz/i,
+    elave: "Maddə 57 58 59 maliyyə sanksiyası 40 manat 50 faiz cərimə məbləği 0.1 faiz"
+  },
+  {
+    acar: /qaimə|qaime|elektron\s*qaimə|\beqf\b/i,
+    elave: "Maddə 71-1 175 176 elektron qaimə-faktura verilmə müddəti 5 gün təsdiqi əvəzləşdirmə Maddə 58.13"
+  },
+  {
+    acar: /(?:ədv|edv|əlavə\s*dəyər).*(?:qeydiyyat|hədd|200\s*000|sıfır|0\s*%|ixrac|azad)/i,
+    elave: "Maddə 155 157 158 164 165 166 ƏDV qeydiyyat 200000 POS 0.5 əmsal 18 faiz 0 faiz"
+  },
+  {
+    acar: /sadələşdirilmiş|sadelesdirilmis|topdansatış|\bb2b\b/i,
+    elave: "Maddə 218 218.5 220 sadələşdirilmiş vergi 2 faiz 8 faiz 30 faiz həddi qadağan olunanlar"
+  },
+  {
+    acar: /amortizasiya|əsas\s*vəsait|esas\s*vesait|təmir\s*xərc|temir\s*xerc/i,
+    elave: "Maddə 108 109 114 115 əsas vəsaitlərin amortizasiyası təmir xərci norması qalıq dəyəri 2 əmsal"
+  },
+  {
+    acar: /kənd\s*təsərrüfat|kend\s*teserrufat|fermer|kənd.*emal/i,
+    elave: "Maddə 13.2.60 Maddə 102.1.11 Maddə 106.1.14 164.1.18 kənd təsərrüfatı istehsal emal azadolma"
+  },
+  {
+    acar: /dividend|təsisçi|tesisci|icarə|icare|royalti|qeyri-rezident|\bömv\b/i,
+    elave: "Maddə 122 123 124 125 ödəmə mənbəyində vergi dividend 5 faiz icarə 14 faiz qeyri-rezident 10 faiz"
+  },
+  {
+    acar: /muzdlu|maaş|əməkhaqqı|sosial\s*sığorta|\bmdss\b|\bits\b|8000\s*manat|(?:əmək\s*müqavilə.*(?:olmadan|cərimə))/i,
+    elave: "Maddə 101.1 101.1-1 102 58.10 muzdlu iş 8000 manat sosial sığorta MDSS İTS 2000 manat cərimə"
+  },
+  {
+    acar: /kameral|səyyar|seyyar|vergi\s*yoxlama|uyğunsuzluq|iddia\s*müddəti/i,
+    elave: "Maddə 37 38 85 kameral vergi yoxlaması 30 iş günü səyyar yoxlama 3 il"
+  },
+  {
+    acar: /kassa\s*metodu|hesablama\s*metodu|avans|debitor/i,
+    elave: "Maddə 130 131 132 166 kassa metodu hesablama metodu gəlir və xərclərin uçotu"
+  },
+  {
+    acar: /əmlak\s*vergisi|emlak\s*vergisi|torpaq\s*vergisi|yol\s*vergisi|mədən\s*vergisi/i,
+    elave: "Maddə 197 199.14 203 206 209 215 əmlak vergisi 1 faiz mikro sahibkar azadolma torpaq vergisi"
+  }
 ];
 
-async function agentAxtarisPlaniQur(sual, aktivMenbeler = [], tenz = null) {
-  const sorgular = [sual];
+async function agentAxtarisPlaniQur(sual, aktivMenbeler = [], tenz = null, sonIstifadeciSuali = "") {
+  // Hər sorğuya öz növünü ("esas", "dialoq", "alt", "ai", "sinonim") və çəki əmsalını əlavə edirik ki, RRF sıralamasında əsas sual həmişə üstün olsun
+  const sorguObyektleri = [{ metn: sual, nov: "esas", ceki: 1.0 }];
+  let dialoqKontekstiElaveEdildi = false;
+  let effektifSual = sual;
+
+  // Çox-Addımlı Dialoq Yaddaşı (Follow-up / Coreference Resolution):
+  // Əgər sual "Bəs...", "Onun...", "Bu halda...", "Həmin..." ilə başlayırsa və ya qısa davam sualıdırsa, əvvəlki sualın mövzusunu cari sualla birləşdir!
+  if (sonIstifadeciSuali && sonIstifadeciSuali !== sual) {
+    const davamSualidir =
+      /^(?:bəs|bes|və\s+bəs|onda|bu\s+halda|bəs\s+bu|bəs\s+onun|onun|onların|həmin|orada|buna\s+görə|belə\s+olduqda|yaxşı\s+bəs)\b/i.test(sual.trim()) ||
+      /\b(?:həmin\s+halda|bu\s+halda|onun\s+üçün|həmin\s+maddə|yuxarıdakı)\b/i.test(sual) ||
+      (sual.length < 68 && !/maddə\s*\d/i.test(sual) && db.sozKokleri(sual).length <= 4);
+
+    if (davamSualidir) {
+      const evvelkiMaddeler = Array.from(
+        String(sonIstifadeciSuali).matchAll(/(?:maddə\s*\d+[0-9.-]*|\b\d{1,3}\.\d+(?:\.\d+)*\b|\b\d+\s*000\b)/gi)
+      ).map(m => m[0]);
+      const evvelkiAcarlar = db.sozKokleri(sonIstifadeciSuali).map(k => k.tam).slice(0, 6);
+      const kontekstPrefiks = Array.from(new Set([...evvelkiMaddeler, ...evvelkiAcarlar])).join(" ").trim();
+      if (kontekstPrefiks) {
+        effektifSual = `${kontekstPrefiks} ${sual}`;
+        // Davam suallarında ("Bəs onun işçisi olmasa...") birləşmiş kontekstli sorğunu 1-ci əsas bucaq (çəki 1.0) et ki, mövzu itməsin!
+        sorguObyektleri[0].ceki = 0.65;
+        sorguObyektleri.unshift({ metn: effektifSual, nov: "dialoq", ceki: 1.05 });
+        dialoqKontekstiElaveEdildi = true;
+      }
+    }
+  }
 
   // Mürəkkəb sualı tərkib hissələrinə (alt-suallara) parçala ki, hər şərt ayrıca axtarılsın
   const altHisseler = sual
@@ -93,45 +175,58 @@ async function agentAxtarisPlaniQur(sual, aktivMenbeler = [], tenz = null) {
     .map(s => s.trim())
     .filter(s => s.length >= 18 && s !== sual);
   for (const h of altHisseler.slice(0, 2)) {
-    sorgular.push(h);
+    sorguObyektleri.push({ metn: h, nov: "alt", ceki: 0.8 });
   }
 
   // 1) Universal Sİ Sorğu Tərcüməçisi (İstənilən sənəd: Konstitusiya, Vergi, Əmək Məcəlləsi, Müqavilə və s. üçün danışıq dilini rəsmi termin və Maddə nömrələrinə çevirir)
-  if (typeof ai.universalSorguPlanla === "function" && sual.length >= 10) {
+  if (typeof ai.universalSorguPlanla === "function" && effektifSual.length >= 10) {
     const aiSorgular = await ai.universalSorguPlanla({
-      sual,
+      sual: effektifSual,
       aktivMenbeAdlari: aktivMenbeler.map(m => m.ad),
       tenz
     });
     for (const aq of aiSorgular) {
-      sorgular.push(aq);
+      sorguObyektleri.push({ metn: aq, nov: "ai", ceki: 0.7 });
     }
   }
 
-  // 2) Sürətli lokal domen sinonimləri (əlavə dəstək kimi)
+  // 2) Sürətli lokal domen sinonimləri (kontekstə həssas əlavə dəstək kimi)
   for (const s of DOMEN_SINONIMLERI) {
-    if (s.acar.test(sual)) {
-      sorgular.push(s.elave);
+    if (s.acar.test(effektifSual) && (!s.istisna || !s.istisna.test(effektifSual))) {
+      sorguObyektleri.push({ metn: s.elave, nov: "sinonim", ceki: 0.45 });
     }
   }
 
-  if (sorgular.length === 1) {
+  if (sorguObyektleri.length === 1) {
     const ilkinKokler = db.sozKokleri(sual).map(k => k.tam);
     if (ilkinKokler.length > 0) {
-      sorgular.push(ilkinKokler.join(" "));
+      sorguObyektleri.push({ metn: ilkinKokler.join(" "), nov: "kok", ceki: 0.75 });
     }
   }
 
-  const unikalSorgular = Array.from(new Set(sorgular.filter(Boolean))).slice(0, 6);
+  const gorulmus = new Set();
+  const unikalObyektler = [];
+  for (const obj of sorguObyektleri) {
+    const t = String(obj.metn || "").trim();
+    if (!t || gorulmus.has(t)) continue;
+    gorulmus.add(t);
+    unikalObyektler.push({ ...obj, metn: t });
+    if (unikalObyektler.length >= 6) break;
+  }
+
   return {
-    meqsed: "Universal Sİ Sorğu Tərcüməsi, Maddə-əsaslı axtarış və parçaların birləşdirilməsi",
-    sorgular: unikalSorgular
+    meqsed: "Universal Sİ Sorğu Tərcüməsi, RRF Maddə-əsaslı axtarış və parçaların birləşdirilməsi",
+    sorgular: unikalObyektler.map(o => o.metn),
+    sorguObyektleri: unikalObyektler,
+    effektifSual,
+    dialoqKontekstiElaveEdildi
   };
 }
 
-// ---- AGENT ADDIM 2: Bazada Çox-Mərhələli Dərin Axtarış və Qonşu Kontekst Birləşdirmə ----
+// ---- AGENT ADDIM 2: Bazada Çox-Mərhələli Dərin Axtarış (RRF + Vektor + Qonşu Maddə Birləşdirmə) ----
 async function agentDerinAxtarisEt({
   sorgular,
+  sorguObyektleri = null,
   qovluq_id = "all",
   gonderen = "",
   tarix_baslangic = "",
@@ -144,11 +239,23 @@ async function agentDerinAxtarisEt({
   const sorguUzreTapilanlar = [];
   const addimLoqlari = [];
 
-  for (let i = 0; i < sorgular.length; i++) {
-    const s = sorgular[i];
+  // Əgər bazada semantik vektorlar varsa, əsas sualın vektorunu hesabla
+  let esasSorguVektoru = null;
+  if (db.bazadaVektorVarmi() && sorgular.length > 0 && typeof ai.vektorYarat === "function") {
+    try {
+      esasSorguVektoru = await ai.vektorYarat(sorgular[0], tenz);
+    } catch (_) {}
+  }
+
+  const obyektler = Array.isArray(sorguObyektleri) && sorguObyektleri.length === sorgular.length
+    ? sorguObyektleri
+    : sorgular.map((s, idx) => ({ metn: s, nov: idx === 0 ? "esas" : "elave", ceki: idx === 0 ? 1.0 : 0.55 }));
+
+  for (let i = 0; i < obyektler.length; i++) {
+    const { metn: s, ceki } = obyektler[i];
     const tapilanlar = db.hibridAxtar({
       sorgu: s,
-      sorguVektoru: null,
+      sorguVektoru: i === 0 ? esasSorguVektoru : null,
       qovluq_id,
       gonderen,
       tarix_baslangic,
@@ -160,16 +267,25 @@ async function agentDerinAxtarisEt({
     sorguUzreTapilanlar.push(tapilanlar);
     addimLoqlari.push(`🔍 Bucaq #${i + 1}: *"${s.slice(0, 85)}${s.length > 85 ? "..." : ""}"* → **${tapilanlar.length}** blok tapıldı.`);
 
-    for (const p of tapilanlar) {
+    // Hər bucağın öz daxilindəki maksimum balına görə normallaşdırma + RRF (Reciprocal Rank Fusion)
+    const maxBucaqBali = tapilanlar[0]?.bal || 1;
+
+    for (let rank = 0; rank < tapilanlar.length; rank++) {
+      const p = tapilanlar[rank];
+      // RRF balı (sıra əsaslı) + Normallaşdırılmış BM25 balı (0..100 şkalasında) * Bucağın çəkisi
+      const rrfHissesi = (1 / (10 + rank + 1)) * 100 * ceki;
+      const normBm25Hissesi = Math.min(80, (p.bal / Math.max(1, maxBucaqBali)) * 60) * ceki;
+      const hesablanmisBal = Number((rrfHissesi + normBm25Hissesi).toFixed(4));
+
       const imza = db.azNormallashdir(p.metn).replace(/\s+/g, " ").trim().slice(0, 140);
       if (!birleshmishParcalarMap.has(p.id)) {
         if (gorulmusImzalar.has(imza)) continue;
         gorulmusImzalar.add(imza);
-        birleshmishParcalarMap.set(p.id, { ...p, _bucaqIndex: i });
+        birleshmishParcalarMap.set(p.id, { ...p, bal: hesablanmisBal, xam_bal: p.bal, _bucaqIndex: i });
       } else {
-        // Əgər eyni blok bir neçə fərqli sorğu bucağında tapılıbsa (kəsişən parça!), onun əhəmiyyət balını artır!
+        // Eyni blok bir neçə fərqli sorğu bucağında tapılıbsa (kəsişən parça!), RRF kəsişmə bonusu əlavə et!
         const movcud = birleshmishParcalarMap.get(p.id);
-        movcud.bal = Number((movcud.bal + p.bal * 0.75).toFixed(4));
+        movcud.bal = Number((movcud.bal + hesablanmisBal * 0.65).toFixed(4));
       }
     }
   }
@@ -220,6 +336,27 @@ async function agentDerinAxtarisEt({
     }
   }
 
+  // Çarpaz Maddə İstinadlarının Avtomatik Açılması (Cross-Reference Resolution):
+  // Tapılan ilk 3 maddənin mətnində başqa maddəyə istinad ("Bu Məcəllənin 163-cü maddəsində...") varsa, onu da bazadan tapıb kontekstə əlavə et!
+  if (balansliSiyahi.length > 0 && balansliSiyahi.length < 12 && typeof db.carpazMaddeleriAl === "function") {
+    for (const esasParca of balansliSiyahi.slice(0, 3)) {
+      const carpazlar = db.carpazMaddeleriAl(esasParca.metn, esasParca.menbe_id);
+      for (const c of carpazlar) {
+        if (!secilmishIdler.has(c.id)) {
+          const imza = db.azNormallashdir(c.metn).replace(/\s+/g, " ").trim().slice(0, 140);
+          if (!gorulmusImzalar.has(imza)) {
+            gorulmusImzalar.add(imza);
+            secilmishIdler.add(c.id);
+            balansliSiyahi.push({ ...c, bal: Number((esasParca.bal * 0.6).toFixed(4)) });
+            addimLoqlari.push(`⚖️ Çarpaz istinad açıldı: **"${c.basliq || c.menbe_adi}"** (#${c.sira}) kontekstə əlavə edildi.`);
+            if (balansliSiyahi.length >= 12) break;
+          }
+        }
+      }
+      if (balansliSiyahi.length >= 12) break;
+    }
+  }
+
   // Əgər bazada sənədlər var amma spesifik açar sözlə az blok çıxıbsa, hər aktiv mənbənin xülasə/pasport və ilk bloklarını da kontekstə qat!
   const aktivMenbeler = db.menbeleriAl(qovluq_id).filter(m => m.aktiv === 1 && (!menbe_nov || m.nov === menbe_nov));
   if (balansliSiyahi.length < 3 && aktivMenbeler.length > 0) {
@@ -254,6 +391,62 @@ async function agentDerinAxtarisEt({
   };
 }
 
+// Mənbələrin Hüquqi Üstünlük İyerarxiyasını təyin et (1: Qızıl Qayda / Ekspert Keysi > 2: Rəsmi Məcəllə / Qərar > 3: Qrup Müzakirəsi / Qeyd)
+function menbeHuquqiDerecesi(p) {
+  const ad = String(p?.menbe_adi || "");
+  const basliq = String(p?.basliq || "");
+  if (/Təsdiqlənmiş Ekspert Keysləri/i.test(ad) || /🎯|✅/.test(basliq)) {
+    return { pillə: 1, etiket: "🥇 1-Cİ DƏRƏCƏLİ — TƏSDİQLƏNMİŞ EKSPERT KEYSI / QIZIL QAYDA" };
+  }
+  if (/Vergi məcəlləsi|AR Vergi Məcəlləsi|NK Qərarı|Konstitusiya|Məcəllə/i.test(ad) || /^Maddə\s+\d+/i.test(basliq)) {
+    return { pillə: 2, etiket: "🥈 2-Cİ DƏRƏCƏLİ — RƏSMİ QANUNVERİCİLİK VƏ MƏCƏLLƏ" };
+  }
+  return { pillə: 3, etiket: "🥉 3-CÜ DƏRƏCƏLİ — QRUP MÜZAKİRƏSİ VƏ İCMAL QEYD" };
+}
+
+// ---- DAXİLİ MÜFƏTTİŞ DOĞRULAMASI (Self-Verification & Hallucination Guardrail) ----
+function cavabiMufettisIleDogrula(cavabMetni, sitatSiyahisi = [], qizilSiyahi = [], ziddiyyetStr = "") {
+  let tekst = String(cavabMetni || "");
+  const maksSitat = sitatSiyahisi.length;
+  let duzelisSayi = 0;
+
+  // 1) Uydurma (mövcud olmayan) sitat nömrələrini ([99] və s.) təmizlə
+  tekst = tekst.replace(/\[(\d+(?:\s*,\s*\d+)*)\]/g, (tam, ic) => {
+    const gecerli = ic
+      .split(",")
+      .map(x => Number(x.trim()))
+      .filter(n => n >= 1 && n <= maksSitat);
+    if (gecerli.length === 0) {
+      duzelisSayi++;
+      return "";
+    }
+    return `[${gecerli.join(", ")}]`;
+  });
+
+  // 2) Əgər suala birbaşa uyğun Qızıl Qayda varsa və AI cavabda onu qeyd etməyibsə, məcburi olaraq cavabın əvvəlinə əlavə et!
+  if (qizilSiyahi.length > 0 && !tekst.includes("[Öyrədilmiş Qızıl Qayda]")) {
+    const esasQizil = String(qizilSiyahi[0].metn || "").replace(/^QIZIL\s*QAYDA(?:\s*\([^)]*\))?:\s*/i, "").trim();
+    const qizilSetir = `- 🎯 **[Öyrədilmiş Qızıl Qayda]:** ${esasQizil}\n\n`;
+    if (/###\s*📌?\s*Konkret və Qısa Cavab:?\s*\n+/i.test(tekst)) {
+      tekst = tekst.replace(/(###\s*📌?\s*Konkret və Qısa Cavab:?\s*\n+)/i, `$1${qizilSetir}`);
+    } else {
+      tekst = `${qizilSetir}${tekst}`;
+    }
+    duzelisSayi++;
+  }
+
+  // 3) Ziddiyyət xəbərdarlığı varsa və cavabda yoxdursa, əlavə et
+  if (ziddiyyetStr && !tekst.includes("Hüquqi Üstünlük Xəbərdarlığı")) {
+    if (/<DETALLI_ANALIZ>/i.test(tekst)) {
+      tekst = tekst.replace(/<DETALLI_ANALIZ>/i, `${ziddiyyetStr}\n\n<DETALLI_ANALIZ>`);
+    } else {
+      tekst += `\n\n${ziddiyyetStr}`;
+    }
+  }
+
+  return { tekst, duzelisSayi };
+}
+
 // ---- AGENT ADDIM 3: Dərin Analitik Sintez (Gemini Deep Thinking + Parçaların Birləşdirilməsi) ----
 async function agentSualCavabla({
   sual,
@@ -270,37 +463,67 @@ async function agentSualCavabla({
   const dusunmeAddimlari = [];
 
   // 1) Birbaşa yaddaş əmri və ya İstifadəçi Ekspert Düzəlişi (Active Learning Loop) varmı?
+  const tarixce = db.sohbetleriAl(qovluq_id, 6);
+  const sonIstifadeciSuali = [...tarixce].reverse().find(m => m.rol === "user")?.metn || "";
+
   const yaddasEmri = sual.match(/^(?:yadda saxla ki|unutma ki|qeyd et ki|yadda saxla\s*[:-])\s*(.+)/i);
-  const duzelisEmri = !yaddasEmri && sual.length > 35 && /(?:düzgün təhlil etmədin|bəyənmədim|səhvdir|əslində belədir|şərti belədi|qaydası belədir|qəbul edilir)/i.test(sual);
+  const duzelisEmri = !yaddasEmri && sual.length > 25 && /(?:düzgün təhlil etmədin|bəyənmədim|səhvdir|yanlışdır|əslində belədir|şərti belədi|qaydası belədir|qəbul edilir|belə hesablanmır|orada səhv)/i.test(sual);
 
   if (yaddasEmri && yaddasEmri[1]) {
+    const temizQayda = yaddasEmri[1].trim();
     db.yaddasElaveEt({
       kateqoriya: "qayda",
-      metn: yaddasEmri[1].trim(),
+      metn: `QIZIL QAYDA: ${temizQayda}`,
       menbe: "Birbaşa Təlimat",
       vaciblik: 5
     });
-    dusunmeAddimlari.push(`📌 İstifadəçi təlimatı birbaşa Uzunmüddətli Şəxsi Yaddaşa yazıldı.`);
+    if (typeof db.praktikaKeysElaveEt === "function") {
+      db.praktikaKeysElaveEt({
+        basliq: `🎯 Öyrədilmiş Qayda: ${temizQayda.slice(0, 70)}`,
+        sual: sonIstifadeciSuali || "Birbaşa İstifadəçi Təlimatı",
+        cavab: temizQayda,
+        gonderen: "İstifadəçi Təlimatı",
+        nov: "duzelis"
+      });
+    }
+    dusunmeAddimlari.push(`📌 İstifadəçi təlimatı həm Uzunmüddətli Yaddaşa, həm də Təcrübə Bankına yazıldı.`);
   } else if (duzelisEmri) {
+    const movzuKonteksti = sonIstifadeciSuali
+      ? `[Mövzu: ${sonIstifadeciSuali.slice(0, 130).replace(/\n/g, " ")}] → `
+      : "";
+    const tamQizilQayda = `QIZIL QAYDA (Ekspert Düzəlişi): ${movzuKonteksti}${sual.slice(0, 380).trim()}`;
     db.yaddasElaveEt({
       kateqoriya: "qayda",
-      metn: `QIZIL QAYDA (İstifadəçi Düzəlişi): ${sual.slice(0, 350).trim()}`,
+      metn: tamQizilQayda,
       menbe: "Ekspert Əks-Əlaqə",
       vaciblik: 5
     });
-    dusunmeAddimlari.push(`📌 İstifadəçinin ekspert düzəlişi "Qızıl Qayda" olaraq Uzunmüddətli Yaddaşa əlavə edildi.`);
+    if (typeof db.praktikaKeysElaveEt === "function") {
+      db.praktikaKeysElaveEt({
+        basliq: `🎯 Ekspert Düzəlişi: ${(sonIstifadeciSuali || sual).slice(0, 70)}`,
+        sual: sonIstifadeciSuali || "Ekspert Düzəlişi",
+        cavab: sual.trim(),
+        gonderen: "Ekspert Əks-Əlaqə",
+        nov: "duzelis"
+      });
+    }
+    dusunmeAddimlari.push(`📌 İstifadəçinin ekspert düzəlişi əvvəlki sualın konteksti ilə birləşdirilərək "Qızıl Qayda" və "Praktiki Keys" kimi yaddaşa yazıldı.`);
   }
 
   const aktivMenbeler = db.menbeleriAl(qovluq_id).filter(m => m.aktiv === 1);
   dusunmeAddimlari.push(`🗂️ Aktiv Baza yoxlanıldı: **${aktivMenbeler.length}** mənbə (${aktivMenbeler.map(m => m.ad).slice(0, 5).join(", ") || "boşdur"}).`);
 
-  // 2) Agent Axtarış Planı qurur (Universal Sİ Sorğu Tərcüməçisi + Maddə/Termin Planlayıcısı)
-  const plan = await agentAxtarisPlaniQur(sual, aktivMenbeler, tenz);
+  // 2) Agent Axtarış Planı qurur (Universal Sİ Sorğu Tərcüməçisi + Dialoq Konteksti + Maddə/Termin Planlayıcısı)
+  const plan = await agentAxtarisPlaniQur(sual, aktivMenbeler, tenz, sonIstifadeciSuali);
+  if (plan.dialoqKontekstiElaveEdildi) {
+    dusunmeAddimlari.push(`💬 Dialoq Konteksti: Əvvəlki sualın mövzusu (*"${sonIstifadeciSuali.slice(0, 70)}..."*) cari davam sualı ilə birləşdirildi.`);
+  }
   dusunmeAddimlari.push(`🧭 Analiz Planı: *${plan.meqsed}* | Axtarış bucaqları: ${plan.sorgular.map(q => `\`${q}\``).join(", ")}`);
 
-  // 3) Bazada Çox-Bucaqlı Dərin Axtarış
+  // 3) Bazada Çox-Bucaqlı Dərin Axtarış (RRF + Semantik Vektor)
   const { parcalar: tapilanParcalar, addimLoqlari } = await agentDerinAxtarisEt({
     sorgular: plan.sorgular,
+    sorguObyektleri: plan.sorguObyektleri,
     qovluq_id,
     gonderen,
     tarix_baslangic,
@@ -331,19 +554,25 @@ async function agentSualCavabla({
     }
   }
 
-  // Sitatları nömrələ
-  const sitatlar = tapilanParcalar.map((p, idx) => ({
-    nomre: idx + 1,
-    parca_id: p.id,
-    menbe_id: p.menbe_id,
-    menbe_adi: p.menbe_adi,
-    menbe_novu: p.menbe_novu,
-    basliq: p.basliq,
-    gonderen: p.gonderen,
-    tarix: p.tarix,
-    metn: p.metn,
-    bal: p.bal
-  }));
+  // Sitatları nömrələ və hüquqi dərəcəsini əlavə et
+  const sitatlar = tapilanParcalar.map((p, idx) => {
+    const huquq = menbeHuquqiDerecesi(p);
+    return {
+      nomre: idx + 1,
+      parca_id: p.id,
+      menbe_id: p.menbe_id,
+      menbe_adi: p.menbe_adi,
+      menbe_novu: p.menbe_novu,
+      basliq: p.basliq,
+      gonderen: p.gonderen,
+      tarix: p.tarix,
+      metn: p.metn,
+      bal: p.bal,
+      xam_bal: p.xam_bal !== undefined ? p.xam_bal : p.bal,
+      huquqi_pille: huquq.pillə,
+      huquqi_etiket: huquq.etiket
+    };
+  });
 
   // Hər aktiv mənbənin Pasport məlumatlarını (məbləğlər, tarixlər, VÖEN-lər) topla
   const pasportXulasesi = aktivMenbeler.slice(0, 10).map(m => {
@@ -358,6 +587,7 @@ async function agentSualCavabla({
   const menbeKonteksti = sitatlar.length > 0
     ? sitatlar.map(s => {
         const metaHisse = [
+          s.huquqi_etiket,
           `Mənbə: ${s.menbe_adi} (${s.menbe_novu})`,
           s.gonderen ? `Şəxs: ${s.gonderen}` : null,
           s.tarix ? `Tarix: ${s.tarix}` : null,
@@ -367,24 +597,48 @@ async function agentSualCavabla({
       }).join("\n\n")
     : "Bazada bu sorğuya birbaşa uyğun parça tapılmadı.";
 
-  const sexsiYaddas = db.yaddaslariAl().slice(0, 25);
+  // Suala ən uyğun (mövzu və maddə üzrə) Uzunmüddətli Yaddaş və Qızıl Qaydaları seç
+  const { siyahi: sexsiYaddas, uygunQizilQaydalar } = typeof db.aktualYaddaslariAl === "function"
+    ? db.aktualYaddaslariAl(plan.effektifSual || sual, 15)
+    : { siyahi: db.yaddaslariAl().slice(0, 15), uygunQizilQaydalar: [] };
+
+  if (uygunQizilQaydalar.length > 0) {
+    dusunmeAddimlari.push(`🎯 Mövzuya uyğun **${uygunQizilQaydalar.length} öyrədilmiş Qızıl Qayda** aktivləşdirildi.`);
+  }
+
+  // Köhnə çat / icmal qeydləri ilə Rəsmi Qanun / Qızıl Qayda arasında ziddiyyət detektoru
+  let ziddiyyetQeydi = "";
+  const resmiBloklar = sitatlar.filter(s => s.huquqi_pille <= 2);
+  const qeyriResmiBloklar = sitatlar.filter(s => s.huquqi_pille === 3);
+  if (resmiBloklar.length > 0 && qeyriResmiBloklar.length > 0) {
+    const resmiBirlesik = resmiBloklar.map(s => s.metn).join(" ") + " " + uygunQizilQaydalar.map(q => q.metn).join(" ");
+    const qeyriResmiBirlesik = qeyriResmiBloklar.map(s => s.metn).join(" ");
+    if (/işçi\s*sayı\s*tələbi\s*(?:yoxdur|olmadan)|3\s*işçi\s*saxlamadan/i.test(resmiBirlesik) && /3\s*işçi/i.test(qeyriResmiBirlesik)) {
+      ziddiyyetQeydi = "⚠️ **Hüquqi Üstünlük Xəbərdarlığı:** Bəzi ümumi qeydlərdə 3 işçi şərti qeyd edilsə də, **Maddə 102.1.30 (1-ci və 2-ci dərəcəli rəsmi norma)** üzrə 45 000 AZN-dək dövriyyəsi olan 13 xidmət sahəsində **işçi sayı tələbi yoxdur (0 işçi ilə tətbiq edilir)**.";
+    } else if (/cari\s*(?:ayın|hesabat)|dəyişikliyin.*baş\s*verdiyi/i.test(resmiBirlesik) && /köhnə\s*ay.*dəqiqləş/i.test(qeyriResmiBirlesik)) {
+      ziddiyyetQeydi = "⚠️ **Hüquqi Üstünlük Xəbərdarlığı:** Qrup müzakirələrində köhnə ayın dəqiqləşdirilməsi fikri keçsə də, **Vergi Məcəlləsinin 163.2 və 72.4-1-ci maddələrinə (rəsmi norma)** əsasən ləğv və ya geri qaytarma **dəyişikliyin baş verdiyi cari ayın bəyannaməsində** nəzərə alınır.";
+    }
+    if (ziddiyyetQeydi) {
+      dusunmeAddimlari.push(`⚖️ Ziddiyyət Detektoru: Rəsmi Məcəllə / Qızıl Qayda ilə köhnə qeyd arasındakı fərq aşkarlandı və rəsmi norma üstün götürüldü.`);
+    }
+  }
+
   const yaddasKonteksti = sexsiYaddas.length > 0
     ? sexsiYaddas.map(y => `- [${y.kateqoriya.toUpperCase()}] ${y.metn}`).join("\n")
     : "Hələ xüsusi yaddaş qeydi yoxdur.";
-
-  const tarixce = db.sohbetleriAl(qovluq_id, 6);
 
   const sistemPromptu = `${tenz.sistem_telimati || "Sən istifadəçinin yüksək intellektli Şəxsi AI Agentisən (Gemini / Claude / ChatGPT və NotebookLM hibridi)."}
 
 SƏNİN ROLUN VƏ DƏRİN ANALİTİK METODOLOGİYAN:
 1. Sən istifadəçinin universal intellektə malik Şəxsi AI Agentisən (İkinci Beyin). Sən **Hüquq, Konstitusiya, Vergi və Mühasibatlıq, Fəlsəfə, Dünyagörüşü, İdarəetmə, Kitablar, Texnologiya və Şəxsi Qeydlər** daxil olmaqla, istifadəçinin sualını və əlavə etdiyi mənbələri dərindən oxuyub **təhlil edən, tənqidi düşünən, arqumentləri tutuşduran və yetkin ekspert fikri/qərarı bildirən** baş məsləhətçisən.
 
-2. **DAXİLİ 5-ADDIMLI DƏRİN ANALİZ VƏ PARÇALARI BİRLƏŞDİRMƏ PROTOKOLU (Cavab yazmazdan əvvəl mütləq icra et):**
+2. **DAXİLİ 6-ADDIMLI DƏRİN ANALİZ VƏ PARÇALARI BİRLƏŞDİRMƏ PROTOKOLU (Cavab yazmazdan əvvəl mütləq icra et):**
    - **Addım A (Parametrlərin Parçalanması):** İstifadəçinin sualındakı BÜTÜN şərtləri tək-tək ayır (məsələn: sənəd şərti + əsas məbləğ ödənişi + ƏDV depozit ödənişi + fərqli tarixlər/aylar + subyektin hüquqi statusu + dövriyyə həddi + işçi sayı + fəaliyyət sahəsi). Heç bir parametri diqqətdən kənarda qoyma!
    - **Addım B (Maddə və Qızıl Qayda Uyğunlaşdırması):** Əvvəlcə aşağıdakı "UZUNMÜDDƏTLİ ŞƏXSİ YADDAŞ"dakı Qızıl Qaydaları və "TAPILMIŞ SİTAT BLOKLARI"ndakı rəsmi maddələri yoxla.
    - **Addım C (Parçaların Birləşdirilməsi — Cross-Piece Synthesis):** Sual bir neçə fərqli mövzunu (məsələn: həm sadələşdirilmiş vergi, həm POS-terminal, həm nağd limit, həm də işçi cəriməsi) və ya fərqli sənədləri əhatə edirsə, hər bir parçanı tapdığın müvafiq maddə ilə əlaqələndirib vahid məntiqi zəncir qur!
    - **Addım D (Kəsişən Şərtlər və İstisnalar):** Əgər əməliyyatın tərkib hissələri fərqli vaxtlarda/aylarda baş verirsə və ya bir neçə şərt eyni vaxtda tələb olunursa, təkcə bir şərti (məsələn, yalnız qaimənin təsdiq tarixini) götürüb səhv nəticə çıxarma — bütün şərtlərin tamamlandığı YEKUN (ƏN SON) tarixi və istisnaları əsas götür!
-   - **Addım E (Müfəttiş Özünü-Tənqidi):** Cavabı bitirməzdən əvvəl özünə sual ver: *"İstifadəçinin sualındakı hər bir hissəni birləşdirdimmi? Dəqiq maddə, rəqəm və praktik misalla tam cavab verdimmi?"*
+   - **Addım E (Qanun və Canlı Praktika Sintezi — Mühasibatlıq Təcrübə Bankı):** Mühasibatlıqda və vergidə bir çox məsələlər yalnız qanunun hərfi mətni ilə bitmir, portalın texniki iş mexanizmi (e-taxes, btp, e-gov), müfəttişlərin kameral yoxlama tələbləri və canlı mühasib təcrübələri ilə uzlaşır. Əgər bazada və ya sitat bloklarında [Praktiki Keys], [Qrup Təcrübəsi] və ya "qovluq-praktika"dan gələn təcrübələr varsa, mütləq həm ⚖️ **Qanunvericiliyin Nəzəri Tələbini**, həm də 💼 **Mühasiblərin Canlı Təcrübəsini və Portal Reallığını** sintez et!
+   - **Addım F (Müfəttiş Özünü-Tənqidi):** Cavabı bitirməzdən əvvəl özünə sual ver: *"İstifadəçinin sualındakı hər bir hissəni birləşdirdimmi? Dəqiq maddə, rəqəm, praktiki keys və real təcrübə ilə tam cavab verdimmi?"*
 
 3. **SUALIN AYDINLIQ DƏRƏCƏSİ VƏ DƏQİQLƏŞDİRİCİ ƏKS-SUAL QAYDASI (MÜTLƏQ ƏMƏL ET!):**
    - **Hal A (Sual heç aydın deyilsə / kontekstsizdirsə):** Əgər istifadəçinin sualı çox qısa və ya tamamilə qeyri-müəyyəndirsə (hansı sənəd, hansı əməliyyat və ya nə soruşulduğu heç bəlli deyilsə), təxmin yürütmə! Birbaşa "### ❓ Dəqiqləşdirici Sual:" başlığı altında məsələni dəqiq araşdırmaq üçün lazım olan 2-3 konkret sualı istifadəçiyə ünvanla.
@@ -398,17 +652,15 @@ SƏNİN ROLUN VƏ DƏRİN ANALİTİK METODOLOGİYAN:
    - Mənbədən götürülən faktların sonuna mütləq [1], [2] kimi sitat nömrəsi qoy.
    - Əgər sualda bəzi fərdi parametrlər (məs: subyektin statusu, vergi rejimi, müqavilə şərti və s.) qeyd edilməyibsə, bu hissənin sonuncu bəndi kimi **❓ Dəqiqləşdirici Sual:** qoyub istifadəçiyə həmin sualı ünvanla.
 
-   HİSSƏ 2 (Geniş təhlil — <DETALLI_ANALIZ> teqləri daxilində 4-bəndli Ekspert Matrisi):
+   HİSSƏ 2 (Geniş təhlil — <DETALLI_ANALIZ> teqləri daxilində Qərar Ağacı Matrisi):
    <DETALLI_ANALIZ>
-   ### 🔍 Geniş Təhlil, Şərtlər və Hüquqi/Nəzəri Əsaslar:
-   #### 1. Tələb Olunan Bütün Şərtlər və Parçaların Birləşdirilməsi:
-   - Məsələnin həlli üçün eyni vaxtda ödənməli olan bütün şərtləri və fərqli maddələrin bir-biri ilə əlaqəsini [1], [2] sitatları ilə izah et.
-   #### 2. Xüsusi Hallar, İstisnalar və Məhdudiyyətlər:
-   - Fərqli tarixlər, hədlər, istisnalar və sanksiya risklərini göstər.
-   #### 3. Praktiki Keys (Rəqəmli / Tarixli Nümunə):
-   - Sualdakı vəziyyəti konkret aylar və ya rəqəmlər üzərində addım-addım hesablayıb nümayiş etdir.
-   #### 4. Ekspert Tövsiyəsi:
-   - İstifadəçinin praktikada səhv etməməsi üçün yekun peşəkar məsləhət ver.
+   ### 🔍 Geniş Təhlil, Şərtlər və Qərar Matrisi:
+   #### ✅ 1. Əsas Hüquqi Qayda və Tələblər:
+   - Məsələnin həlli üçün əsas qanunvericilik norması və eyni vaxtda ödənməli olan bütün şərtləri [1], [2] sitatları ilə izah et.
+   #### 🔀 2. Şərtlər, İstisnalar və Xüsusi Hallar (Qərar Ağacı):
+   - "Əgər X halıdırsa → A qaydası; Əgər Y halıdırsa → B istisnası" şəklində şərtləri, fərqli tarixləri, dövriyyə/işçi hədlərini və canlı praktiki keysləri (e-taxes, btp nüanslarını) göstər.
+   #### 🚨 3. Maliyyə Sanksiyası, Cərimə və Risklər:
+   - Qaydaya əməl edilmədikdə tətbiq olunan maliyyə sanksiyasını, cərimə faizlərini və vergi yoxlaması risklərini dəqiq maddə ilə göstər.
    </DETALLI_ANALIZ>
 
    HİSSƏ 3 (Mövzunu dərinləşdirən 2-3 ağıllı növbəti sual — <NOVBETI_SUALLAR> teqləri daxilində):
@@ -420,8 +672,8 @@ SƏNİN ROLUN VƏ DƏRİN ANALİTİK METODOLOGİYAN:
 5. **Mənbə Şəffaflığı:**
    - Fakt TAPILMIŞ SİTAT BLOKLARI içində varsa, mütləq həmin blokun nömrəsini [1], [2] kimi göstər.
    - Fakt sitat bloklarında yoxdursa və öz ümumi hüquqi/ekspert biliyinlə tamamlayırsansa, uydurma sitat nömrəsi qoyma və bunu açıq qeyd et.
-6. **Avtomatik Şəxsi Yaddaş:** İstifadəçinin maraqlarına, iş qaydalarına aid vacib məqamları yadda saxla:
-<YADDAŞ kateqoriya="fakt|qayda|tapşırıq|şəxs">Qısa fakt</YADDAŞ>
+6. **Avtomatik Şəxsi Yaddaş:** YALNIZ istifadəçinin özünə, şirkətinə, müştərisinə və ya xüsusi iş qaydasına aid fərdi fakt olduqda (adi ümumi qanun maddələrini bura təkrar yazma!) ən sonda əlavə et:
+<YADDAŞ kateqoriya="fakt|qayda|tapşırıq|şəxs">Qısa fərdi fakt</YADDAŞ>
 
 UZUNMÜDDƏTLİ ŞƏXSİ YADDAŞ (QIZIL QAYDALAR — BİRİNCİ DƏRƏCƏLİ ÜSTÜNLÜK!):
 ${yaddasKonteksti}`;
@@ -445,6 +697,9 @@ ${sual}`;
   });
 
   const sonMelumat = ai.llmCagir.sonMelumat || {};
+  if (sonMelumat.xeta) {
+    dusunmeAddimlari.push(`⚠️ AI Xəbərdarlığı: ${sonMelumat.xeta}`);
+  }
   if (sonMelumat.model) {
     dusunmeAddimlari.push(
       `🧠 Analitik Mühərrik: **${sonMelumat.model}** (${sonMelumat.derinRejim ? "Dərin Təfəkkür / Thinking Rejimi Aktiv" : "Sürətli Rejim"})`
@@ -459,10 +714,47 @@ ${sual}`;
   }
 
   if (!xamCavab) {
-    xamCavab = ai.lokalAnalitikCavabQur(sual, sitatlar);
+    xamCavab = ai.lokalAnalitikCavabQur(sual, sitatlar, uygunQizilQaydalar, ziddiyyetQeydi);
+  }
+
+  const mufettis = cavabiMufettisIleDogrula(xamCavab, sitatlar, uygunQizilQaydalar, ziddiyyetQeydi);
+  xamCavab = mufettis.tekst;
+  dusunmeAddimlari.push(
+    `🕵️ Daxili Müfəttiş Yoxlaması: Mənbə üstünlük iyerarxiyası, sitat nömrələri və Qızıl Qayda uyğunluğu doğrulandı.`
+  );
+
+  // Bilik Boşluğu (Knowledge Gap) və Etibarlılıq Dərəcəsini müəyyən et
+  const enYuksekXamBal = sitatlar[0]?.xam_bal || 0;
+  const sualKokleri = db.sozKokleri(sual).filter(k => k.normKok.length >= 3);
+  const topMetnNorm = db.azNormallashdir(
+    sitatlar.slice(0, 2).map(s => (s.basliq || "") + " " + (s.metn || "")).join(" ")
+  );
+  let tapilanKokSayi = 0;
+  for (const k of sualKokleri) {
+    if (topMetnNorm.includes(k.normKok)) tapilanKokSayi++;
+  }
+  const kokEhateNisbeti = sualKokleri.length > 0 ? tapilanKokSayi / sualKokleri.length : 1;
+
+  const bilikBoslugu =
+    sitatlar.length === 0 ||
+    (uygunQizilQaydalar.length === 0 && (enYuksekXamBal < 24 || (sualKokleri.length >= 4 && kokEhateNisbeti < 0.4)));
+
+  const resmiMaddeTapildi =
+    !bilikBoslugu &&
+    sitatlar.some(s => (s.huquqi_pille <= 2 && (s.xam_bal || 0) >= 35) || /^Maddə\s+\d+/i.test(s.basliq || ""));
+
+  const etibarliliq = (resmiMaddeTapildi || uygunQizilQaydalar.length > 0)
+    ? "🟢 Yüksək Dəqiqlik (Rəsmi Maddə + Qızıl Qayda Təsdiqli)"
+    : !bilikBoslugu
+      ? "🟡 Orta Dəqiqlik (Mənbə + Analitik Sintez)"
+      : "🔴 Bilik Boşluğu (Bazada bu mövzuya aid rəsmi sənəd tapılmadı)";
+
+  if (bilikBoslugu) {
+    dusunmeAddimlari.push(`📌 Bilik Boşluğu Qeydə Alındı: Bazada bu mövzu üzrə rəsmi mənbə zəifdir — "🎯 Düzəliş Öyrət" düyməsi ilə dəqiq qaydanı 1 kliklə sistemə öyrədə bilərsiniz.`);
   }
 
   const muddetSan = ((Date.now() - baslangicVaxt) / 1000).toFixed(1);
+  dusunmeAddimlari.push(`🛡️ Etibarlılıq: **${etibarliliq}**`);
   dusunmeAddimlari.push(`⚡ Analiz **${muddetSan} saniyəyə** tamamlandı (${sitatlar.length} mənbə bloku birləşdirildi).`);
 
   const yeniYaddaslar = [];
@@ -487,7 +779,8 @@ ${sual}`;
     qovluq_id,
     rol: "assistant",
     metn: temizCavab,
-    sitatlar: sitatlar.map(s => ({ ...s, dusunmeAddimlari }))
+    // dusunmeAddimlari-ni yalnız 1-ci sitat obyektində saxla ki, baza 12x şişməsin
+    sitatlar: sitatlar.map((s, idx) => (idx === 0 ? { ...s, dusunmeAddimlari } : s))
   });
 
   return {
@@ -495,12 +788,15 @@ ${sual}`;
     sitatlar,
     dusunmeAddimlari,
     yeniYaddaslar,
+    bilikBoslugu,
     notebooklmFaylSayi: geminiFileParts.length
   };
 }
 
 module.exports = {
   agentSualCavabla,
+  cavabiMufettisIleDogrula,
+  menbeHuquqiDerecesi,
   nlmKorpuDurumuYenile,
   nlmKorpuVeziyyeti,
   nlmNövbəniAl,

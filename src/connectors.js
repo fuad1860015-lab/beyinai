@@ -47,7 +47,7 @@ setInterval(() => {
   for (const [k, v] of tgDetalliYaddas.entries()) {
     if (indi - v.vaxt > 2 * 60 * 60 * 1000) tgDetalliYaddas.delete(k);
   }
-}, 30 * 60 * 1000);
+}, 30 * 60 * 1000).unref();
 
 function telegramCavabiFormatla(xamMetn, sitatlar = []) {
   if (!xamMetn) return { qisa: "", genis: null, suallar: [] };
@@ -148,25 +148,35 @@ async function tgMesajGonder(token, chatId, metn, secimler = {}) {
   } catch (_) {}
 }
 
-// Canlı gələn tək mesajı Mərkəzi Beyinə əlavə edir
+// Canlı gələn mesajı Mərkəzi Beyinə əlavə edir (Yaxın vaxtda gələn ardıcıl Forward müzakirələrini vahid "Praktiki Keys" blokunda birləşdirir!)
 function canliMesajiBazayaYaz({ platforma = "Telegram", qovluq_id, gonderen, tarix, metn, basliq }) {
+  // Boş salam-sağol mesajlarını süz
+  if (typeof parsers.chatZibilleriniTemizle === "function") {
+    const süzülmüş = parsers.chatZibilleriniTemizle([{ metn }]);
+    if (süzülmüş.length === 0) return null;
+  }
+
   const menbeler = db.menbeleriAl(qovluq_id);
-  const canliAd = `📡 Canlı ${platforma} Axını`;
+  const canliAd = qovluq_id === "qovluq-praktika"
+    ? `💼 Canlı ${platforma} Təcrübə və Keys Axını`
+    : `📡 Canlı ${platforma} Axını`;
   let movcud = menbeler.find(m => m.ad === canliAd);
+  const tamMetn = `[${tarix}] ${gonderen}: ${metn}`;
+  const indi = Date.now();
 
   if (!movcud) {
     const yeni = db.menbeElaveEt({
       qovluq_id,
       ad: canliAd,
       nov: platforma.toLowerCase(),
-      olcu: metn.length,
-      xulase: `Canlı ${platforma} bağlantısı vasitəsilə gələn mesajlar və səsli qeydlər`,
-      meta: { platforma, canli: true },
-      xam_metn: `[${tarix}] ${gonderen}: ${metn}`,
+      olcu: Buffer.byteLength(tamMetn, "utf8"),
+      xulase: `Canlı ${platforma} bağlantısı vasitəsilə toplanan real müzakirələr, praktiki keyslər və səsli qeydlər`,
+      meta: { platforma, canli: true, praktika: qovluq_id === "qovluq-praktika" },
+      xam_metn: tamMetn,
       parcalar: [
         {
           basliq: basliq || `${canliAd} (${tarix})`,
-          metn: `[${tarix}] ${gonderen}: ${metn}`,
+          metn: tamMetn,
           gonderen,
           tarix
         }
@@ -176,12 +186,55 @@ function canliMesajiBazayaYaz({ platforma = "Telegram", qovluq_id, gonderen, tar
     return yeni;
   }
 
-  // Mövcud canlı mənbəyə yeni parça əlavə et
-  const detallar = db.menbeDetaliAl(movcud.id);
-  const yeniSira = (detallar?.parcalar?.length || 0) + 1;
-  const crypto = require("node:crypto");
+  // Sonuncu parçanı yoxla: Əgər son 4 dəqiqə ərzində göndərilibsə və uzunluğu < 1500 simvoldursa, ardıcıl sual-cavab müzakirəsi kimi həmin parçaya birləşdir!
+  const sonParca = db.db.prepare(
+    "SELECT * FROM parcalar WHERE menbe_id = ? ORDER BY sira DESC LIMIT 1"
+  ).get(movcud.id);
+
+  if (sonParca && (indi - (sonParca.yaradildi || 0) < 4 * 60 * 1000) && (sonParca.metn || "").length < 1500) {
+    const birlesikMetn = `${sonParca.metn}\n${tamMetn}`;
+    const kimlerSet = new Set(
+      String(sonParca.gonderen || "")
+        .split(",")
+        .map(x => x.trim())
+        .filter(Boolean)
+    );
+    if (gonderen) kimlerSet.add(gonderen);
+    const yeniKimler = Array.from(kimlerSet).join(", ");
+
+    // İlk sətirdən mövzu başlığı çıxar
+    const ilkMesajMetni = birlesikMetn.replace(/^\[\d[^\]]*\]\s*[^:]+:\s*/, "").split("\n")[0].slice(0, 65).trim();
+    const yeniBasliq = qovluq_id === "qovluq-praktika"
+      ? `💼 Praktiki Keys (${yeniKimler}): ${ilkMesajMetni}`
+      : sonParca.basliq;
+
+    db.db.prepare(`
+      UPDATE parcalar
+      SET basliq = ?, metn = ?, gonderen = ?, yaradildi = ?
+      WHERE id = ?
+    `).run(yeniBasliq, birlesikMetn, yeniKimler, indi, sonParca.id);
+
+    db.db.prepare(`
+      UPDATE menbeler
+      SET xam_metn = substr(xam_metn || char(10) || ?, 1, 3000000),
+          olcu = olcu + ?
+      WHERE id = ?
+    `).run(tamMetn, Buffer.byteLength(tamMetn, "utf8"), movcud.id);
+
+    ai.vektorYarat(birlesikMetn).then(v => {
+      if (v) db.parcaVektorYenile(sonParca.id, v);
+    }).catch(() => {});
+
+    if (typeof db.parcaKesiniSifirla === "function") db.parcaKesiniSifirla();
+    return movcud;
+  }
+
+  // Yeni müstəqil müzakirə parçası yarat
+  const yeniSira = (sonParca?.sira || 0) + 1;
   const pid = "p-" + crypto.randomUUID().slice(0, 12);
-  const tamMetn = `[${tarix}] ${gonderen}: ${metn}`;
+  const yeniParcaBasliq = qovluq_id === "qovluq-praktika"
+    ? `💼 Praktiki Keys (${gonderen}): ${metn.slice(0, 65).replace(/\n/g, " ")}`
+    : (basliq || `${canliAd} #${yeniSira}`);
 
   db.db.prepare(`
     INSERT INTO parcalar (id, menbe_id, qovluq_id, sira, basliq, metn, gonderen, tarix, meta, vektor, yaradildi)
@@ -191,14 +244,23 @@ function canliMesajiBazayaYaz({ platforma = "Telegram", qovluq_id, gonderen, tar
     movcud.id,
     qovluq_id,
     yeniSira,
-    basliq || `${canliAd} #${yeniSira}`,
+    yeniParcaBasliq,
     tamMetn,
     gonderen,
     tarix,
-    JSON.stringify({ platforma, canli: true }),
-    Date.now()
+    JSON.stringify({ platforma, canli: true, praktika: qovluq_id === "qovluq-praktika" }),
+    indi
   );
 
+  // Mənbənin ümumi xam_metn və ölçü sütunlarını da yenilə
+  db.db.prepare(`
+    UPDATE menbeler
+    SET xam_metn = substr(xam_metn || char(10) || ?, 1, 3000000),
+        olcu = olcu + ?
+    WHERE id = ?
+  `).run(tamMetn, Buffer.byteLength(tamMetn, "utf8"), movcud.id);
+
+  if (typeof db.parcaKesiniSifirla === "function") db.parcaKesiniSifirla();
   ai.vektorYarat(`${gonderen}: ${metn}`).then(v => {
     if (v) db.parcaVektorYenile(pid, v);
   }).catch(() => {});
@@ -228,6 +290,19 @@ async function tgUpdateEmalEt(token, update) {
       } else if (cbChatId) {
         await tgMesajGonder(token, cbChatId, "ℹ️ Bu sualın detallı təhlili üçün sualı yenidən göndərə bilərsiniz.");
       }
+    } else if (data.startsWith("ok_")) {
+      const detalId = data.replace("ok_", "");
+      const qeyd = tgDetalliYaddas.get(detalId);
+      if (qeyd && cbChatId && typeof db.praktikaKeysElaveEt === "function") {
+        db.praktikaKeysElaveEt({
+          basliq: `✅ Təsdiqlənmiş Keys: ${(qeyd.sual || "").slice(0, 75)}`,
+          sual: qeyd.sual || "Telegram Ekspert Sualı",
+          cavab: (qeyd.qisa || qeyd.metn || "").replace(/<[^>]+>/g, ""),
+          gonderen: "Telegram Ekspert Təsdiqi",
+          nov: "tesdiq"
+        });
+        await tgMesajGonder(token, cbChatId, "✅ <b>Təsdiqləndi!</b> Bu cavab etalon praktiki keys kimi <b>Mühasibatlıq Praktikası və Təcrübə Bankı</b>na əlavə olundu.");
+      }
     }
     return;
   }
@@ -252,38 +327,63 @@ async function tgUpdateEmalEt(token, update) {
 
   const metn = (msg.text || msg.caption || "").trim();
 
+  const isForward = !!(
+    msg.forward_date ||
+    msg.forward_from ||
+    msg.forward_from_chat ||
+    msg.forward_sender_name ||
+    msg.forward_signature
+  );
+
   // 0) Telegram Komandaları və Birbaşa Sual-Cavab
   if (metn === "/start") {
     await tgMesajGonder(
       token,
       chatId,
       "🧠 Salam! Mən sizin Şəxsi AI Agentiniz və İkinci Beyninizəm.\n\n" +
-      "Mənə istənilən mövzuda (Hüquq, Konstitusiya, Vergi/Mühasibatlıq, Fəlsəfə, Dünyagörüşü, Kitablar və Sənədlər) sual yaza, səsli mesaj ata və ya oxunması üçün PDF/Word faylları göndərə bilərsiniz."
+      "Mənə istənilən mövzuda (Hüquq, Konstitusiya, Vergi/Mühasibatlıq, Fəlsəfə, Dünyagörüşü, Kitablar və Sənədlər) sual yaza, səsli mesaj ata və ya oxunması üçün PDF/Word faylları göndərə bilərsiniz.\n\n" +
+      "📌 <b>Birbaşa yaddaşa qayda/qeyd yazmaq üçün:</b> <code>/qeyd Mətn...</code> yazın.\n" +
+      "💼 <b>Qrup Təcrübələri / Keyslər:</b> Digər Telegram qruplarından maraqlı mühasib müzakirələrini bura Forward etsəniz, avtomatik <b>Mühasibatlıq Praktikası Bankına</b> yazılacaq və gələcək suallarınızda nəzərə alınacaq!"
     );
     return;
   }
 
-  // Əgər istifadəçi birbaşa sual və ya mülahizə yazıbsa (Forward deyil)
-  if (metn && !msg.forward_date && !msg.document && !msg.voice && !msg.audio) {
+  // Birbaşa /qeyd və ya /yaddas komandası ilə qeyd saxlamaq
+  if (/^\/(?:qeyd|yaddas)\s+(.+)/is.test(metn)) {
+    const qeydMetni = metn.replace(/^\/(?:qeyd|yaddas)\s+/i, "").trim();
+    db.yaddasElaveEt({
+      kateqoriya: "qayda",
+      metn: qeydMetni,
+      menbe: "Telegram Əmri",
+      vaciblik: 5
+    });
+    await tgMesajGonder(token, chatId, `📌 <b>Uzunmüddətli Yaddaşa əlavə olundu:</b>\n<i>"${qeydMetni}"</i>`);
+    return;
+  }
+
+  const hasPhoto = Array.isArray(msg.photo) && msg.photo.length > 0;
+
+  // Əgər istifadəçi birbaşa sual və ya mülahizə yazıbsa (Forward deyil və media faylı deyil)
+  if (metn && !isForward && !msg.document && !msg.voice && !msg.audio && !hasPhoto) {
     try {
       const agent = require("./agent");
       await tgMesajGonder(token, chatId, "🧠 Düşünürəm və mənbələri analiz edirəm...");
       const nət = await agent.agentSualCavabla({ sual: metn, qovluq_id: "all" });
       const formatlanmis = telegramCavabiFormatla(nət.cavab.metn, nət.sitatlar);
 
-      const secimler = {};
+      const detalId = crypto.randomUUID().slice(0, 8);
+      tgDetalliYaddas.set(detalId, {
+        vaxt: Date.now(),
+        sual: metn,
+        qisa: formatlanmis.qisa,
+        metn: formatlanmis.genis || formatlanmis.qisa
+      });
+      const duymeler = [];
       if (formatlanmis.genis) {
-        const detalId = crypto.randomUUID().slice(0, 8);
-        tgDetalliYaddas.set(detalId, {
-          vaxt: Date.now(),
-          metn: formatlanmis.genis
-        });
-        secimler.reply_markup = {
-          inline_keyboard: [
-            [{ text: "🔍 Geniş Təhlil və Praktiki Nümunə", callback_data: `det_${detalId}` }]
-          ]
-        };
+        duymeler.push([{ text: "🔍 Geniş Təhlil və Praktiki Nümunə", callback_data: `det_${detalId}` }]);
       }
+      duymeler.push([{ text: "👍 Doğrudur (Təcrübə Bankına Qat)", callback_data: `ok_${detalId}` }]);
+      const secimler = { reply_markup: { inline_keyboard: duymeler } };
 
       await tgMesajGonder(token, chatId, formatlanmis.qisa, secimler);
       return;
@@ -303,8 +403,11 @@ async function tgUpdateEmalEt(token, update) {
         faylAdi,
         mimeType: msg.document.mime_type || ""
       });
+      const isPraktikaChat = emal.nov === "whatsapp" || emal.nov === "telegram" || emal.parcalar?.some(p => p.meta?.praktika);
+      const senedQovluq = isPraktikaChat ? "qovluq-praktika" : qovluq_id;
+
       const elave = db.menbeElaveEt({
-        qovluq_id,
+        qovluq_id: senedQovluq,
         ad: emal.ad || faylAdi,
         nov: emal.nov,
         olcu: buffer.length,
@@ -316,7 +419,18 @@ async function tgUpdateEmalEt(token, update) {
       ai.menbeVektorlashdir(elave).catch(() => {});
       tgVeziyyet.qebulEdilenSay++;
       tgVeziyyet.sonMesajTarixi = tarix;
-      await tgMesajGonder(token, chatId, `✅ Sənəd Mərkəzi Beyinə əlavə edildi: ${faylAdi} (${emal.parcalar.length} hissə)`);
+      if (isPraktikaChat) {
+        await tgMesajGonder(
+          token,
+          chatId,
+          `💼 <b>Mühasibatlıq Praktikası Bankına əlavə edildi!</b>\n` +
+          `• <b>Fayl:</b> ${faylAdi}\n` +
+          `• <b>Analiz:</b> 85% boş mesaj süzüldü, ${emal.parcalar.length} faydalı praktiki keys və dialoq saxlanıldı.\n\n` +
+          `✅ Sual verdiyinizdə bu canlı təcrübələr cavablarda nəzərə alınacaq.`
+        );
+      } else {
+        await tgMesajGonder(token, chatId, `✅ Sənəd Mərkəzi Beyinə əlavə edildi: ${faylAdi} (${emal.parcalar.length} hissə)`);
+      }
       return;
     } catch (e) {
       await tgMesajGonder(token, chatId, `⚠️ Sənəd oxunarkən xəta: ${e.message}`);
@@ -381,7 +495,7 @@ async function tgUpdateEmalEt(token, update) {
   }
 
   // 3) Fotoşəkil (Photo) göndərilibsə
-  if (Array.isArray(msg.photo) && msg.photo.length > 0) {
+  if (hasPhoto) {
     try {
       const enBoyukFoto = msg.photo[msg.photo.length - 1];
       const { buffer } = await tgFaylEndir(token, enBoyukFoto.file_id);
@@ -391,9 +505,10 @@ async function tgUpdateEmalEt(token, update) {
         faylAdi: "telegram_photo.jpg"
       });
       const tamMetn = `${metn ? metn + "\n" : ""}🖼️ [Şəkildəki Mətn/Təsvir]: ${analiz.metn}`;
+      const hedefQovluq = isForward ? "qovluq-praktika" : qovluq_id;
       canliMesajiBazayaYaz({
         platforma: "Telegram",
-        qovluq_id,
+        qovluq_id: hedefQovluq,
         gonderen,
         tarix,
         metn: tamMetn,
@@ -401,7 +516,18 @@ async function tgUpdateEmalEt(token, update) {
       });
       tgVeziyyet.qebulEdilenSay++;
       tgVeziyyet.sonMesajTarixi = tarix;
-      await tgMesajGonder(token, chatId, `🖼️ Şəkil analiz edildi və yaddaşa saxlanıldı (${gonderen}).`);
+
+      if (!isForward && metn) {
+        // İstifadəçi şəklin altında sual və ya tapşırıq yazıbsa, həm OCR mətnini, həm də sualı birlikdə cavablandır
+        await tgMesajGonder(token, chatId, `🖼️ Şəkil oxundu, sualınız analiz edilir...`);
+        const agent = require("./agent");
+        const birlesikSual = `Şəkildəki mətn: "${analiz.metn}"\n\nİstifadəçinin sualı: ${metn}`;
+        const nət = await agent.agentSualCavabla({ sual: birlesikSual, qovluq_id: "all" });
+        const formatlanmis = telegramCavabiFormatla(nət.cavab.metn, nət.sitatlar);
+        await tgMesajGonder(token, chatId, formatlanmis.qisa);
+      } else {
+        await tgMesajGonder(token, chatId, `🖼️ Şəkil analiz edildi və yaddaşa saxlanıldı (${gonderen}).`);
+      }
       return;
     } catch (e) {
       await tgMesajGonder(token, chatId, `⚠️ Şəkil analiz edilərkən xəta: ${e.message}`);
@@ -409,26 +535,30 @@ async function tgUpdateEmalEt(token, update) {
     }
   }
 
-  // 4) Adi və ya Forward edilmiş mətn mesajı
-  if (metn && metn !== "/start") {
+  // 4) Forward edilmiş mətn mesajı (Qrup Təcrübələri / Mühasibatlıq Praktikası Bankı)
+  if (metn && isForward) {
+    const hedefQovluq = "qovluq-praktika";
+    const basliq = `💼 Qrup Təcrübəsi — ${gonderen} (${tarix})`;
+
     canliMesajiBazayaYaz({
       platforma: "Telegram",
-      qovluq_id,
+      qovluq_id: hedefQovluq,
       gonderen,
       tarix,
       metn,
-      basliq: `💬 Telegram — ${gonderen} (${tarix})`
+      basliq
     });
     tgVeziyyet.qebulEdilenSay++;
     tgVeziyyet.sonMesajTarixi = tarix;
-    await tgMesajGonder(token, chatId, `🧠 Yaddaşa saxlanıldı: [${tarix}] ${gonderen}`);
-  } else if (metn === "/start") {
+
+    const qisaGosteris = metn.length > 100 ? metn.slice(0, 100).replace(/\n/g, " ") + "..." : metn;
     await tgMesajGonder(
       token,
       chatId,
-      `👋 Salam! Mən sənin BeyinAI (Şəxsi AI Asistant) botunam.\n\n` +
-      `📌 Mənə istənilən mesajı, səsli qeydi (voice), PDF/Word faylını və ya şəkli "Forward" et — dərhal oxuyub Mərkəzi Beyin bazasına əlavə edəcəyəm.\n` +
-      `❓ Bazadan sual soruşmaq üçün mesajın əvvəlinə "?" qoy (məsələn: "? Əli qiymət barədə nə demişdi?").`
+      `💼 <b>Mühasibatlıq Praktikası Bankına əlavə edildi!</b>\n` +
+      `• <b>Mənbə / Şəxs:</b> ${gonderen}\n` +
+      `• <b>Qeyd:</b> <i>"${qisaGosteris}"</i>\n\n` +
+      `✅ Bu real təcrübə və canlı keys növbəti suallarınızın analizində nəzərə alınacaq.`
     );
   }
 }

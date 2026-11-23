@@ -13,6 +13,7 @@ const { fayliWorkerIleEmalEt } = require("./src/worker-fayl");
 const geminiFiles = require("./src/gemini-files");
 
 const PORT = Number(process.env.PORT) || 3847;
+const HOST = process.env.HOST || "0.0.0.0";
 const PUBLIC_DIR = path.join(__dirname, "public");
 
 const MIME_TIPLERI = {
@@ -302,10 +303,11 @@ const server = http.createServer(async (req, res) => {
       }
 
       const emal = await parsers.whatsappOxu(metn, basliq);
+      const isMuhasibatMetni = /(?:vergi|məcəllə|qaimə|ədv|müqavilə|maddə\s+\d+|mühasib|bəyannamə)/i.test(basliq + " " + metn.slice(0, 800));
       const hedefQovluq =
         qovluq_id && qovluq_id !== "all"
           ? qovluq_id
-          : (emal.nov === "whatsapp" ? "qovluq-cat" : "qovluq-sexsi");
+          : (emal.nov === "whatsapp" ? "qovluq-cat" : (isMuhasibatMetni ? "qovluq-is" : "qovluq-sexsi"));
 
       const menbe = db.menbeElaveEt({
         qovluq_id: hedefQovluq,
@@ -382,12 +384,21 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    // 7. Mənbə Aktiv/Deaktiv və ya Silmə
+    // 7. Mənbə Aktiv/Deaktiv, Qovluq Dəyişmə və ya Silmə
     if (yol.startsWith("/api/menbeler/") && req.method === "PUT") {
       const id = decodeURIComponent(yol.split("/").pop());
       const b = await govdeOxu(req);
-      db.menbeAktivlikDeyis(id, b.aktiv);
-      return jsonCavab(res, 200, { ok: true });
+      if (b.aktiv !== undefined) {
+        db.menbeAktivlikDeyis(id, b.aktiv);
+      }
+      if (b.qovluq_id && typeof db.menbeQovluqDeyis === "function") {
+        db.menbeQovluqDeyis(id, b.qovluq_id);
+      }
+      return jsonCavab(res, 200, {
+        ok: true,
+        qovluqlar: db.qovluqlariAl(),
+        statistika: db.statistikaAl()
+      });
     }
 
     if (yol.startsWith("/api/menbeler/") && req.method === "DELETE") {
@@ -448,6 +459,34 @@ const server = http.createServer(async (req, res) => {
       return jsonCavab(res, 200, { ok: true });
     }
 
+    // 8c. Bütün Bazada Ani Maddə və Açar Söz Axtarışı (<10ms)
+    if (yol === "/api/axtar" && req.method === "GET") {
+      const q = (urlObj.searchParams.get("q") || "").trim();
+      const qovluq_id = urlObj.searchParams.get("qovluq_id") || "all";
+      if (!q) {
+        return jsonCavab(res, 200, { ok: true, neticeler: [] });
+      }
+      const tapilan = db.hibridAxtar({
+        sorgu: q,
+        qovluq_id,
+        limit: 15
+      });
+      return jsonCavab(res, 200, {
+        ok: true,
+        neticeler: tapilan.map(r => ({
+          id: r.id,
+          menbe_id: r.menbe_id,
+          menbe_adi: r.menbe_adi,
+          menbe_novu: r.menbe_novu,
+          basliq: r.basliq,
+          gonderen: r.gonderen,
+          tarix: r.tarix,
+          metn: r.metn.slice(0, 380),
+          xal: Number((r.xal || 0).toFixed(1))
+        }))
+      });
+    }
+
     // 9. Uzunmüddətli Şəxsi Yaddaş
     if (yol === "/api/yaddas" && req.method === "POST") {
       const b = await govdeOxu(req);
@@ -455,10 +494,78 @@ const server = http.createServer(async (req, res) => {
       return jsonCavab(res, 200, { ok: true, yaddas: db.yaddaslariAl() });
     }
 
+    if (yol.startsWith("/api/yaddas/") && req.method === "PUT") {
+      const id = decodeURIComponent(yol.split("/").pop());
+      const b = await govdeOxu(req);
+      if (!b.metn || !b.metn.trim()) {
+        return jsonCavab(res, 400, { ok: false, xeta: "Yaddaş mətni boş ola bilməz." });
+      }
+      db.yaddasRedakteEt(id, b);
+      return jsonCavab(res, 200, { ok: true, yaddas: db.yaddaslariAl() });
+    }
+
     if (yol.startsWith("/api/yaddas/") && req.method === "DELETE") {
       const id = decodeURIComponent(yol.split("/").pop());
       db.yaddasSil(id);
       return jsonCavab(res, 200, { ok: true, yaddas: db.yaddaslariAl() });
+    }
+
+    // 9b. Aktiv Özü-Öyrənmə Dövrəsi (👍 Cavabı Təsdiqlə & 🎯 Ekspert Düzəlişi Öyrət)
+    if (yol === "/api/oyren" && req.method === "POST") {
+      const b = await govdeOxu(req);
+      const { nov = "tesdiq", sual = "", cavab = "", duzelis = "" } = b;
+
+      if (nov === "duzelis") {
+        if (!duzelis || !duzelis.trim()) {
+          return jsonCavab(res, 400, { ok: false, xeta: "Düzəliş mətni boş ola bilməz." });
+        }
+        const movzu = sual ? `[Mövzu: ${sual.slice(0, 130).replace(/\n/g, " ")}] → ` : "";
+        const qizilMetn = `QIZIL QAYDA (Ekspert Düzəlişi): ${movzu}${duzelis.trim()}`;
+        const yad = db.yaddasElaveEt({
+          kateqoriya: "qayda",
+          metn: qizilMetn,
+          menbe: "Ekspert Əks-Əlaqə",
+          vaciblik: 5
+        });
+        const keys = db.praktikaKeysElaveEt({
+          basliq: `🎯 Ekspert Düzəlişi: ${(sual || duzelis).slice(0, 75)}`,
+          sual: sual || "Ekspert Düzəlişi",
+          cavab: duzelis.trim(),
+          gonderen: "Ekspert Əks-Əlaqə",
+          nov: "duzelis"
+        });
+        return jsonCavab(res, 200, {
+          ok: true,
+          yaddas: db.yaddaslariAl(),
+          qovluqlar: db.qovluqlariAl(),
+          statistika: db.statistikaAl(),
+          elaveYaddas: yad,
+          keysMenbeId: keys?.id || null
+        });
+      }
+
+      // nov === "tesdiq" (Cavabı etalon keys kimi Mühasibatlıq Praktikası və Təcrübə Bankına əlavə et)
+      const qisaHisse = String(cavab || "")
+        .split(/<DETALLI_ANALIZ>/i)[0]
+        .replace(/###\s*📌?\s*Konkret və Qısa Cavab:?/i, "")
+        .replace(/\[\d+(?:\s*,\s*\d+)*\]/g, "")
+        .trim();
+
+      const keys = db.praktikaKeysElaveEt({
+        basliq: `✅ Təsdiqlənmiş Keys: ${(sual || qisaHisse).slice(0, 75)}`,
+        sual: sual || "Təsdiqlənmiş Ekspert Sualı",
+        cavab: qisaHisse || cavab,
+        gonderen: "Ekspert Təsdiqi",
+        nov: "tesdiq"
+      });
+
+      return jsonCavab(res, 200, {
+        ok: true,
+        yaddas: db.yaddaslariAl(),
+        qovluqlar: db.qovluqlariAl(),
+        statistika: db.statistikaAl(),
+        keysMenbeId: keys?.id || null
+      });
     }
 
     // 10. Tənzimləmələr və Canlı Bağlantılar (Telegram / WhatsApp)
@@ -562,7 +669,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, "0.0.0.0", () => {
+server.listen(PORT, HOST, () => {
   console.log(`\n======================================================`);
   console.log(`🧠 BeyinAI (Şəxsi AI Asistant & NotebookLM) işə düşdü!`);
   console.log(`🌐 Ünvan: http://localhost:${PORT}`);
