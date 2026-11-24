@@ -47,10 +47,11 @@ async function geminiServereYukle({ buffer, mimeType, displayName, apiKey }) {
 
   // 1) Yükləmə sessiyasını başlat (Start Resumable Upload)
   const startRes = await fetch(
-    `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${encodeURIComponent(key)}`,
+    `https://generativelanguage.googleapis.com/upload/v1beta/files`,
     {
       method: "POST",
       headers: {
+        "X-goog-api-key": key,
         "X-Goog-Upload-Protocol": "resumable",
         "X-Goog-Upload-Command": "start",
         "X-Goog-Upload-Header-Content-Length": String(buffer.length),
@@ -103,8 +104,11 @@ async function geminiServereYukle({ buffer, mimeType, displayName, apiKey }) {
     await new Promise(r => setTimeout(r, 1400));
     cehd++;
     const checkRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/${fileObj.name}?key=${encodeURIComponent(key)}`,
-      { signal: AbortSignal.timeout(10000) }
+      `https://generativelanguage.googleapis.com/v1beta/${fileObj.name}`,
+      {
+        headers: { "X-goog-api-key": key },
+        signal: AbortSignal.timeout(10000)
+      }
     );
     if (checkRes.ok) {
       fileObj = await checkRes.json();
@@ -192,8 +196,12 @@ async function menbeFayliniSil(menbe) {
   if (meta.gemini_file?.name && tenz.gemini_api_key) {
     try {
       await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/${meta.gemini_file.name}?key=${encodeURIComponent(tenz.gemini_api_key.trim())}`,
-        { method: "DELETE", signal: AbortSignal.timeout(8000) }
+        `https://generativelanguage.googleapis.com/v1beta/${meta.gemini_file.name}`,
+        {
+          method: "DELETE",
+          headers: { "X-goog-api-key": tenz.gemini_api_key.trim() },
+          signal: AbortSignal.timeout(8000)
+        }
       );
     } catch (_) {}
   }
