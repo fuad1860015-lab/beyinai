@@ -201,7 +201,11 @@ async function pdfMetnVeSehifeleriCixar(buffer) {
     } catch (_) {}
   }
 
-  await pdfDoc.destroy().catch(() => {});
+  if (pdfDoc && typeof pdfDoc.destroy === "function") {
+    await pdfDoc.destroy().catch(() => {});
+  } else if (pdfDoc && typeof pdfDoc.cleanup === "function") {
+    await pdfDoc.cleanup().catch(() => {});
+  }
 
   return {
     sehifeSayi,

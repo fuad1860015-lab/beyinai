@@ -566,14 +566,19 @@ function sohbetleriCiz() {
     let aletlerHtml = "";
     if (m.rol === "assistant" && !m.gozleyir) {
       aletlerHtml = `
-        <div class="mesaj-aletler" style="flex-wrap:wrap;">
-          <button type="button" class="mesaj-alet-duyme vurqulu" data-oyren-tesdiq="${idx}" title="Bu cavabı təsdiqləyərək Mühasibatlıq Təcrübə Bankına etalon keys kimi əlavə et">👍 Doğrudur (Təcrübə Bankına Qat)</button>
-          <button type="button" class="mesaj-alet-duyme" data-oyren-duzelis="${idx}" title="Səhvi düzəldərək sistemə yeni Qızıl Qayda öyrət" style="border-color:rgba(245,158,11,0.35)!important; color:#fcd34d!important;">🎯 Düzəliş Öyrət</button>
-          <button type="button" class="mesaj-alet-duyme" data-yeniden="${idx}" title="Bu sualı yenidən cavablandır">🔄 Yenidən Cavabla</button>
-          <button type="button" class="mesaj-alet-duyme" data-etrafli="${idx}">🔍 Ətraflı İzah</button>
-          <button type="button" class="mesaj-alet-duyme" data-kopyala="${idx}">📋 Kopyala</button>
-          <button type="button" class="mesaj-alet-duyme" data-seslendir="${idx}">🔊 Səsləndir</button>
-          <button type="button" class="mesaj-alet-duyme" data-endir="${idx}">📥 Endir (.md)</button>
+        <div class="mesaj-hover-aletler">
+          <button type="button" class="mini-ikon-btn" data-kopyala="${idx}" title="Kopyala">📋</button>
+          <button type="button" class="mini-ikon-btn" data-oyren-tesdiq="${idx}" title="👍 Doğrudur (Təcrübə Bankına Qat)">👍</button>
+          <button type="button" class="mini-ikon-btn" data-oyren-duzelis="${idx}" title="🎯 Düzəliş Öyrət">🎯</button>
+          <div class="menu-acilan-qabi">
+            <button type="button" class="mini-ikon-btn btn-daha-cox" data-menu-toggle="${idx}" title="Daha çox seçim">•••</button>
+            <div class="menu-acilan-siyahi" id="menuAletler_${idx}">
+              <button type="button" class="menu-element" data-yeniden="${idx}">🔄 Yenidən Cavabla</button>
+              <button type="button" class="menu-element" data-etrafli="${idx}">🔍 Ətraflı İzah</button>
+              <button type="button" class="menu-element" data-seslendir="${idx}">🔊 Səsləndir</button>
+              <button type="button" class="menu-element" data-endir="${idx}">📥 Hesabatı Endir (.md)</button>
+            </div>
+          </div>
         </div>
       `;
     }
@@ -754,6 +759,18 @@ function sohbetleriCiz() {
       } catch (err) {
         bildirisGoster("⚠️ " + err.message);
       }
+    });
+  });
+
+  qutu.querySelectorAll("[data-menu-toggle]").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      const idx = btn.getAttribute("data-menu-toggle");
+      const menu = document.getElementById(`menuAletler_${idx}`);
+      document.querySelectorAll(".menu-acilan-siyahi.aktiv").forEach(m => {
+        if (m !== menu) m.classList.remove("aktiv");
+      });
+      if (menu) menu.classList.toggle("aktiv");
     });
   });
 
@@ -1618,6 +1635,24 @@ document.addEventListener("DOMContentLoaded", () => {
       bildirisGoster("💾 AI tənzimləmələri yadda saxlanıldı!");
     }
     melumatlariYenile();
+  });
+
+  // Sol paneli aç/bağla (ChatGPT / Claude tərzi)
+  const btnSolToggle = document.getElementById("btnSolPanelToggle");
+  const solPanel = document.querySelector(".sol-panel");
+  if (btnSolToggle && solPanel) {
+    btnSolToggle.addEventListener("click", () => {
+      solPanel.classList.toggle("bagli");
+      localStorage.setItem("beyin_sol_bagli", solPanel.classList.contains("bagli") ? "1" : "0");
+    });
+    if (localStorage.getItem("beyin_sol_bagli") === "1") {
+      solPanel.classList.add("bagli");
+    }
+  }
+
+  // Qlobal klik: Açıq 3-nöqtə menyularını bağla
+  document.addEventListener("click", () => {
+    document.querySelectorAll(".menu-acilan-siyahi.aktiv").forEach(m => m.classList.remove("aktiv"));
   });
 
   document.getElementById("btnBaglantilar").addEventListener("click", () => {

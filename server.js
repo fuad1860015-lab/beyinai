@@ -26,13 +26,54 @@ const MIME_TIPLERI = {
   ".ico": "image/x-icon"
 };
 
+const TEHLUKESIZLIK_BASLIQLARI = {
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "SAMEORIGIN",
+  "Referrer-Policy": "no-referrer",
+  "X-XSS-Protection": "1; mode=block"
+};
+
+// Sadə və yüngül IP əsaslı Rate-Limiter (dəqiqədə maks. 120 API sorğusu)
+const rateLimitMap = new Map();
+const RATE_LIMIT_PENCERE_MS = 60 * 1000;
+const RATE_LIMIT_MAKS = 120;
+
+setInterval(() => {
+  const indi = Date.now();
+  for (const [ip, qeyd] of rateLimitMap.entries()) {
+    if (indi - qeyd.baslangic > RATE_LIMIT_PENCERE_MS * 2) {
+      rateLimitMap.delete(ip);
+    }
+  }
+}, 5 * 60 * 1000).unref();
+
+function sorguLimitiniYoxla(req) {
+  const ip =
+    String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
+    req.socket?.remoteAddress ||
+    "local";
+  const indi = Date.now();
+  let qeyd = rateLimitMap.get(ip);
+  if (!qeyd || indi - qeyd.baslangic > RATE_LIMIT_PENCERE_MS) {
+    qeyd = { baslangic: indi, say: 1 };
+    rateLimitMap.set(ip, qeyd);
+    return { icaze: true, qalan: RATE_LIMIT_MAKS - 1 };
+  }
+  qeyd.say++;
+  if (qeyd.say > RATE_LIMIT_MAKS) {
+    return { icaze: false, qalan: 0 };
+  }
+  return { icaze: true, qalan: RATE_LIMIT_MAKS - qeyd.say };
+}
+
 function jsonCavab(res, status, data) {
   const govde = JSON.stringify(data);
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type"
+    "Access-Control-Allow-Headers": "Content-Type",
+    ...TEHLUKESIZLIK_BASLIQLARI
   });
   res.end(govde);
 }
@@ -182,6 +223,12 @@ const server = http.createServer(async (req, res) => {
     const yol = urlObj.pathname;
 
     // ---- API MARŞRUTLARI ----
+    if (yol.startsWith("/api/")) {
+      const lim = sorguLimitiniYoxla(req);
+      if (!lim.icaze) {
+        return jsonCavab(res, 429, { ok: false, xeta: "Çox sayda sorğu göndərildi. Zəhmət olmasa 1 dəqiqə gözləyin." });
+      }
+    }
 
     // 1. Ümumi vəziyyət (Bootstrap)
     if (yol === "/api/bootstrap" && req.method === "GET") {
@@ -421,6 +468,23 @@ const server = http.createServer(async (req, res) => {
       if (!b.sual || !b.sual.trim()) {
         return jsonCavab(res, 400, { ok: false, xeta: "Sual boş ola bilməz." });
       }
+
+      // Əgər kalkulyator sorğusudursa, dərhal dəqiq riyazi alqoritmlə cavabla
+      const calculator = require("./src/calculator");
+      if (calculator.kalkulyatorSorgusudurmu(b.sual)) {
+        const kalk = calculator.kalkulyatorEmalEt(b.sual);
+        return jsonCavab(res, 200, {
+          ok: true,
+          cavab: {
+            metn: kalk.mesaj,
+            model: "Daxili Mühasibat Kalkulyatoru",
+            istifadeEdilenParcaSayi: 0
+          },
+          sitatlar: [],
+          yaddas: db.yaddaslariAl()
+        });
+      }
+
       const netice = await agent.agentSualCavabla({
         sual: b.sual.trim(),
         qovluq_id: b.qovluq_id || "all",
@@ -643,10 +707,76 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
+    // 12. Mühasibat və Əməkhaqqı Kalkulyatoru API
+    if (yol === "/api/kalkulyator" && req.method === "POST") {
+      const b = await govdeOxu(req);
+      const calculator = require("./src/calculator");
+      const netice = calculator.kalkulyatorEmalEt(b.metn || "");
+      return jsonCavab(res, 200, { ok: true, ...netice });
+    }
+
+    // 13. Həftəlik Mühasibat Təcrübə Bülleteni API
+    if (yol === "/api/bulleten" && (req.method === "GET" || req.method === "POST")) {
+      const bulleten = require("./src/bulleten");
+      const icmal = await bulleten.heftelikBulletenHazirla();
+      return jsonCavab(res, 200, { ok: true, icmal });
+    }
+
+    // 14. Bilik Boşluqları (Knowledge Gap Log) API
+    if (yol === "/api/bosluqlar" && req.method === "GET") {
+      return jsonCavab(res, 200, { ok: true, bosluqlar: db.bilikBosluqlariniAl(30) });
+    }
+
+    if (yol.startsWith("/api/bosluqlar/") && req.method === "DELETE") {
+      const id = decodeURIComponent(yol.split("/").pop());
+      db.bilikBosluguHellEt(id);
+      return jsonCavab(res, 200, { ok: true, bosluqlar: db.bilikBosluqlariniAl(30) });
+    }
+
+    // 15. Yaddaşın Özünü-Təmizləməsi (Memory Consolidation) API
+    if (yol === "/api/yaddas/konsolidasiya" && req.method === "POST") {
+      const consolidator = require("./src/memory-consolidator");
+      const netice = await consolidator.yaddasiKonsolidasiyaEt({ aiIstifadeEt: true });
+      return jsonCavab(res, 200, { ...netice, yaddas: db.yaddaslariAl() });
+    }
+
+    // 16. 1-Kliklə Baza Ehtiyat Nüsxəsi (SQLite Backup) API
+    if (yol === "/api/backup" && req.method === "GET") {
+      const bkp = db.bazaBackupHazirla();
+      res.writeHead(200, {
+        "Content-Type": "application/x-sqlite3",
+        "Content-Disposition": `attachment; filename="${bkp.faylAdi}"`,
+        "Content-Length": bkp.olcu,
+        ...TEHLUKESIZLIK_BASLIQLARI
+      });
+      res.end(bkp.buffer);
+      return;
+    }
+
+    // 17. Tam Semantik Vektor İndeksləməsi API
+    if (yol === "/api/vektor/status" && req.method === "GET") {
+      return jsonCavab(res, 200, { ok: true, ...ai.vektorIsiVeziyyetiAl() });
+    }
+
+    if (yol === "/api/vektor/yenile" && req.method === "POST") {
+      const cari = ai.vektorIsiVeziyyetiAl();
+      if (cari.gedir) {
+        return jsonCavab(res, 200, { ok: true, gedir: true, mesaj: "Vektorlaşdırma artıq gedir.", ...cari });
+      }
+      ai.butunBazaniVektorlashdir({ batchOlcu: 5, gecikmeMs: 250 }).catch(() => {});
+      return jsonCavab(res, 200, {
+        ok: true,
+        basladildi: true,
+        mesaj: "Tam semantik vektorlaşdırma arxa planda başladıldı.",
+        ...ai.vektorIsiVeziyyetiAl()
+      });
+    }
+
     // ---- STATİK FAYLLAR (/public) ----
-    let faylYolu = yol === "/" ? path.join(PUBLIC_DIR, "index.html") : path.join(PUBLIC_DIR, yol);
-    if (!faylYolu.startsWith(PUBLIC_DIR)) {
-      res.writeHead(403);
+    const nisbiYol = yol === "/" ? "index.html" : yol.replace(/^\/+/, "");
+    const faylYolu = path.resolve(PUBLIC_DIR, nisbiYol);
+    if (!faylYolu.startsWith(path.resolve(PUBLIC_DIR))) {
+      res.writeHead(403, TEHLUKESIZLIK_BASLIQLARI);
       res.end("Qadağandır");
       return;
     }
@@ -657,11 +787,12 @@ const server = http.createServer(async (req, res) => {
         "Content-Type": MIME_TIPLERI[uz] || "application/octet-stream",
         "Cache-Control": "no-cache, no-store, must-revalidate",
         "Pragma": "no-cache",
-        "Expires": "0"
+        "Expires": "0",
+        ...TEHLUKESIZLIK_BASLIQLARI
       });
       fs.createReadStream(faylYolu).pipe(res);
     } else {
-      res.writeHead(404);
+      res.writeHead(404, TEHLUKESIZLIK_BASLIQLARI);
       res.end("Tapılmadı");
     }
   } catch (err) {
@@ -669,10 +800,32 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+// ---- Global Server Qalxanı (Gözlənilməz xətalarda serverin çökməsinin qarşısını alır) ----
+process.on("uncaughtException", err => {
+  console.error("🛡️ [Global Qoruyucu - uncaughtException]:", err?.message || err);
+});
+
+process.on("unhandledRejection", reason => {
+  console.error("🛡️ [Global Qoruyucu - unhandledRejection]:", reason?.message || reason);
+});
+
+function seliqeliDayandir(siqnal) {
+  console.log(`\n🛑 [${siqnal}] Server səliqəli dayandırılır, SQLite WAL yaddaşa yazılır...`);
+  try {
+    db.db.exec("PRAGMA wal_checkpoint(TRUNCATE);");
+  } catch (_) {}
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 3000).unref();
+}
+
+process.on("SIGINT", () => seliqeliDayandir("SIGINT"));
+process.on("SIGTERM", () => seliqeliDayandir("SIGTERM"));
+
 server.listen(PORT, HOST, () => {
   console.log(`\n======================================================`);
-  console.log(`🧠 BeyinAI (Şəxsi AI Asistant & NotebookLM) işə düşdü!`);
+  console.log(`🧠 BeyinAI v2.9 (Şəxsi AI Asistant & İkinci Beyin) işə düşdü!`);
   console.log(`🌐 Ünvan: http://localhost:${PORT}`);
+  console.log(`🛡️ Server Qalxanı: Rate-Limit + Təhlükəsiz Başlıqlar + Global Qoruyucu Aktiv`);
   console.log(`======================================================\n`);
 
   // Əgər Telegram Bot Token bazada varsa, avtomatik başlat

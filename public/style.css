@@ -175,8 +175,30 @@ body {
 }
 
 /* 3. SOL PANEL (QOVLUQLAR VƏ MƏNBƏLƏR) */
+/* Sol Paneli Gizlə/Aç Düyməsi (ChatGPT Tərzi) */
+.sol-panel-toggle-btn {
+  background: transparent;
+  border: 1px solid var(--serhed);
+  color: #94a3b8;
+  font-size: 14px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  margin-right: 2px;
+}
+
+.sol-panel-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f1f5f9;
+}
+
 .sol-panel {
-  width: 250px;
+  width: 260px;
   background: var(--bg-panel);
   border-right: 1px solid var(--serhed);
   display: flex;
@@ -184,6 +206,15 @@ body {
   flex-shrink: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1), margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sol-panel.bagli {
+  width: 0 !important;
+  margin-left: -260px !important;
+  border-right: none !important;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .sol-qrup {
@@ -578,41 +609,90 @@ body {
 }
 
 /* Mesaj Əməliyyat Düymələri (Kopyala, Endir və s.) — Zərif Ghost Rejim */
-.mesaj-aletler {
+/* Mesaj Əməliyyat Düymələri (ChatGPT / Claude Tərzi — Hover və 3-Nöqtə Menyusu) */
+.mesaj-hover-aletler {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  opacity: 0.85;
+  transition: opacity 0.2s ease;
+}
+
+.mesaj-qutu:hover .mesaj-hover-aletler {
+  opacity: 1;
+}
+
+.mini-ikon-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  line-height: 1;
+}
+
+.mini-ikon-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.btn-daha-cox {
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+/* 3-Nöqtə Açılan Menyusu */
+.menu-acilan-qabi {
+  position: relative;
+  display: inline-block;
+}
+
+.menu-acilan-siyahi {
+  display: none;
+  position: absolute;
+  bottom: 28px;
+  left: 0;
+  background: #182234;
+  border: 1px solid var(--serhed);
+  border-radius: 8px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+  min-width: 170px;
+  z-index: 100;
+  overflow: hidden;
+  padding: 4px 0;
+}
+
+.menu-acilan-siyahi.aktiv {
+  display: flex;
+  flex-direction: column;
+}
+
+.menu-element {
+  background: transparent;
+  border: none;
+  color: #cbd5e1;
+  padding: 8px 12px;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 4px;
+  width: 100%;
+  transition: background 0.12s ease;
 }
 
-.mesaj-alet-duyme {
-  background: rgba(255, 255, 255, 0.04) !important;
-  border: 1px solid rgba(255, 255, 255, 0.09) !important;
-  color: #94a3b8 !important;
-  padding: 4px 9px !important;
-  border-radius: 6px !important;
-  font-size: 11px !important;
-  cursor: pointer !important;
-  transition: all 0.15s ease !important;
-}
-
-.mesaj-alet-duyme:hover {
-  background: rgba(255, 255, 255, 0.1) !important;
-  color: #ffffff !important;
-  border-color: rgba(255, 255, 255, 0.2) !important;
-}
-
-.mesaj-alet-duyme.vurqulu {
-  background: rgba(99, 102, 241, 0.15) !important;
-  border-color: rgba(99, 102, 241, 0.35) !important;
-  color: #a5b4fc !important;
-  font-weight: 500 !important;
-}
-
-.mesaj-alet-duyme.vurqulu:hover {
-  background: rgba(99, 102, 241, 0.3) !important;
-  color: #ffffff !important;
-  border-color: #818cf8 !important;
+.menu-element:hover {
+  background: rgba(99, 102, 241, 0.15);
+  color: #fff;
 }
 
 /* DETALLI ANALİZ AKKORDEONU (İki Mərhələli Cavab Rejimi) */
@@ -784,6 +864,28 @@ body {
 
 .sual-formu textarea::placeholder {
   color: #64748b;
+}
+
+/* Sənəd Əlavə Etmə İkon Düyməsi (Input daxilindəki 📎) */
+.sened-at-duyme {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: transparent;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 16px;
+  margin-right: 2px;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.sened-at-duyme:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f1f5f9;
 }
 
 .ses-duyme {
