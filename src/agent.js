@@ -110,6 +110,10 @@ const DOMEN_SINONIMLERI = [
     elave: "Maddə 218 218.5 220 sadələşdirilmiş vergi 2 faiz 8 faiz 30 faiz həddi qadağan olunanlar"
   },
   {
+    acar: /kassa\s*çeki|kassa\s*ceki|nka\s*çeki|nka\s*ceki|qaiməsiz|qaimesiz|xərcə\s*sal|xerce\s*sal|gəlirdən\s*çıx|gelirden\s*cix|sənədləşdirilməmiş|senedlesdirilmemis/i,
+    elave: "Maddə 108 108.1 109 109.1 109.8 Maddə 71-1 71-1.5 gəlirdən çıxılan xərclər gəlirdən çıxılmayan xərclər nəzarət-kassa aparatının çeki elektron qaimə-faktura pərakəndə ticarət"
+  },
+  {
     acar: /amortizasiya|əsas\s*vəsait|esas\s*vesait|təmir\s*xərc|temir\s*xerc/i,
     elave: "Maddə 108 109 114 115 əsas vəsaitlərin amortizasiyası təmir xərci norması qalıq dəyəri 2 əmsal"
   },
@@ -424,9 +428,12 @@ function cavabiMufettisIleDogrula(cavabMetni, sitatSiyahisi = [], qizilSiyahi = 
     return `[${gecerli.join(", ")}]`;
   });
 
-  // 2) Əgər suala birbaşa uyğun Qızıl Qayda varsa və AI cavabda onu qeyd etməyibsə, məcburi olaraq cavabın əvvəlinə əlavə et!
-  if (qizilSiyahi.length > 0 && !tekst.includes("[Öyrədilmiş Qızıl Qayda]")) {
-    const esasQizil = String(qizilSiyahi[0].metn || "").replace(/^QIZIL\s*QAYDA(?:\s*\([^)]*\))?:\s*/i, "").trim();
+  // 2) Yalnız istifadəçinin birbaşa əl ilə öyrətdiyi (Ekspert Əks-Əlaqə / Birbaşa Təlimat) və sualla yüksək uyğunluğa malik Qızıl Qayda varsa qeyd et
+  const birbasaQizil = qizilSiyahi.find(
+    q => (q.menbe === "Birbaşa Təlimat" || q.menbe === "Ekspert Əks-Əlaqə") && ((q._maddeUygun || 0) > 0 || (q._spesifikUygun || 0) >= 3)
+  );
+  if (birbasaQizil && !tekst.includes("[Öyrədilmiş Qızıl Qayda]")) {
+    const esasQizil = String(birbasaQizil.metn || "").replace(/^QIZIL\s*QAYDA(?:\s*\([^)]*\))?:\s*/i, "").trim();
     const qizilSetir = `- 🎯 **[Öyrədilmiş Qızıl Qayda]:** ${esasQizil}\n\n`;
     if (/###\s*📌?\s*Konkret və Qısa Cavab:?\s*\n+/i.test(tekst)) {
       tekst = tekst.replace(/(###\s*📌?\s*Konkret və Qısa Cavab:?\s*\n+)/i, `$1${qizilSetir}`);
@@ -819,7 +826,7 @@ SƏNİN ROLUN VƏ DƏRİN ANALİTİK METODOLOGİYAN:
 6. **Avtomatik Şəxsi Yaddaş:** YALNIZ istifadəçinin özünə, şirkətinə, müştərisinə və ya xüsusi iş qaydasına aid fərdi fakt olduqda (adi ümumi qanun maddələrini bura təkrar yazma!) ən sonda əlavə et:
 <YADDAŞ kateqoriya="fakt|qayda|tapşırıq|şəxs">Qısa fərdi fakt</YADDAŞ>${qanunPraktikaTelimati}
 
-UZUNMÜDDƏTLİ ŞƏXSİ YADDAŞ (QIZIL QAYDALAR — BİRİNCİ DƏRƏCƏLİ ÜSTÜNLÜK!):
+UZUNMÜDDƏTLİ ŞƏXSİ YADDAŞ (Köməkçi kontekst — YALNIZ istifadəçinin sualının əsas mövzusuna 100% uyğun olduqda istifadə et; əlaqəsiz yaddaş qeydlərini qətiyyən cavaba qatma!):
 ${yaddasKonteksti}`;
 
   const yenidenBloku = yenidenArasdir

@@ -884,7 +884,9 @@ const UMUMI_DOMEN_SOZLERI = new Set([
   "maddə", "madde", "madd", "məcəllə", "mecelle", "qanun", "faiz", "tətbiq", "tetbiq",
   "əsasən", "esasen", "olduqda", "halda", "hallar", "görə", "gore", "üzrə", "uzre",
   "aylıq", "ayliq", "illik", "gəlir", "gelir", "məbləğ", "mebleg", "hüquq", "huquq",
-  "şərt", "sert", "qayda", "əməliyyat", "emeliyyat", "hesabat", "dövr", "dovr"
+  "şərt", "sert", "qayda", "əməliyyat", "emeliyyat", "hesabat", "dövr", "dovr",
+  "xərc", "xerc", "xərclər", "xercler", "ödəniş", "odenis", "şirkət", "sirket",
+  "mənfəət", "menfeet", "bəyannamə", "beyanname", "sənəd", "sened"
 ]);
 
 // Sualın mövzusuna, spesifik açar sözlərinə və maddə nömrələrinə görə ən aktual Uzunmüddətli Yaddaş (Qızıl Qaydalar) siyahısını seçir
