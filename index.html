@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="az">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BeyinAI — Şəxsi AI Asistant</title>
+  <link rel="stylesheet" href="/style.css?v=3.1" />
+</head>
+<body>
+  <!-- 1. ÜST PANEL: Sakit, səliqəli və təmiz -->
+  <header class="ust-panel">
+    <div class="brend">
+      <button class="sol-panel-toggle-btn" id="btnSolPanelToggle" title="Sol Menyu (Aç/Bağla)">
+        ☰
+      </button>
+      <div class="logo-ikon">🧠</div>
+      <h1 class="brend-ad">BeyinAI</h1>
+    </div>
+
+    <!-- Mərkəzdə aktiv qovluq adı -->
+    <div class="aktiv-qovluq-badge" id="aktivQovluqGosterici">
+      🌐 Mərkəzi Beyin
+    </div>
+
+    <!-- Sağda: Yalnız zəruri AI statusu və tənzimləmələr -->
+    <div class="ust-sag">
+      <button class="derin-rejim-btn aktiv" id="btnDerinRejim" title="Dərin Təhlil Rejimi">
+        🧠 Dərin Təhlil
+      </button>
+      <div class="ai-status-badge" id="btnTenzimlemeler" title="AI Tənzimləmələri">
+        <span class="status-dot"></span>
+        <span id="aktivAiEtiket">Gemini 3 Flash</span>
+        <span style="opacity:0.6;">⚙️</span>
+      </div>
+      <button class="temizle-ikon-btn" id="btnSohbetTemizle" title="Söhbəti təmizlə">
+        🗑️
+      </button>
+      <button class="sitat-toggle-btn" id="btnPanelToggle" title="Mənbə və Sitat Paneli">
+        📑 Sitatlar
+      </button>
+    </div>
+
+    <!-- JS uyğunluğu üçün gizli saxlanılan elementlər -->
+    <div style="display:none;" id="statistikaLent">
+      <span id="statQovluq">0</span><span id="statMenbe">0</span><span id="statParca">0</span><span id="statYaddas">0</span>
+      <button id="btnDemoYukle"></button><button id="btnBaglantilar"><span id="canliNoqte"></span></button>
+      <button id="btnSohbetEndir"></button>
+    </div>
+  </header>
+
+  <!-- 2. ƏSAS İŞ SAHƏSİ -->
+  <main class="is-sahesi">
+    <!-- SOL PANEL: Sənədlər və Qovluqlar -->
+    <aside class="sol-panel">
+      <!-- Qovluqlar -->
+      <div class="sol-qrup">
+        <div class="qrup-basliq">
+          <span>QOVLUQLAR</span>
+          <button class="plus-btn" id="btnYeniQovluq" title="Yeni Qovluq yarat">+ Yeni</button>
+        </div>
+        <div class="qovluq-siyahisi" id="qovluqSiyahisi"></div>
+      </div>
+
+      <!-- Sənəd Əlavə Etmə Bölməsi -->
+      <div class="sol-qrup">
+        <div class="qrup-basliq">
+          <span>SƏNƏD ƏLAVƏ ET</span>
+        </div>
+        <label class="fayl-yukle-btn" id="yuklemeQutusu">
+          <input type="file" id="faylSecici" multiple accept=".pdf,.docx,.xlsx,.csv,.txt,.md,.json,.html,.zip,.ogg,.opus,.mp3,.wav,.m4a,.png,.jpg,.jpeg,.webp" hidden />
+          <span>📁 Fayl Seçin və ya Atın</span>
+        </label>
+
+        <!-- Yükləmə Zolağı -->
+        <div id="yuklemeDurumQutusu" class="yukleme-durum-qutusu" hidden>
+          <div class="yukleme-durum-ust">
+            <span id="yuklemeDurumMetn">⏳ Oxunur...</span>
+            <button type="button" class="kicik-duyme" id="btnYuklemeLegv">✕</button>
+          </div>
+          <div class="progress-arxa">
+            <div class="progress-ic" id="yuklemeProgressBar"></div>
+          </div>
+        </div>
+
+        <div class="sol-mini-duymeler">
+          <button class="mini-btn" id="btnMetnModal">📋 Qeyd Yapışdır</button>
+          <button class="mini-btn" id="btnLinkModal">🔗 Link</button>
+        </div>
+      </div>
+
+      <!-- Mənbələr Siyahısı (Düzgün səliqəli kartlar) -->
+      <div class="sol-qrup menbeler-qrupu">
+        <div class="qrup-basliq">
+          <span>MƏNBƏLƏR (<span id="menbeSaygac">0</span>)</span>
+        </div>
+        <div class="menbe-siyahisi" id="menbeSiyahisi"></div>
+      </div>
+    </aside>
+
+    <!-- ORTA PANEL: Təmiz, Sakit Çat Sahəsi (Göz yormayan, geniş) -->
+    <section class="orta-panel">
+      <!-- Çat Mesajları -->
+      <div class="sohbet-axini" id="sohbetAxini"></div>
+
+      <!-- Sual Daxiletmə Paneli (Müasir Minimalist ChatGPT / Claude Tərzi) -->
+      <div class="sual-qabi">
+        <!-- JS uyğunluğu üçün gizli saxlanılan filtr və köməkçi düymələr -->
+        <div style="display:none;">
+          <button type="button" id="btnFiltrToggle"></button>
+          <div id="filtrAcilanPanel">
+            <select id="filtrGonderen"><option value="">Bütün şəxslər</option></select>
+            <select id="filtrNov"><option value="">Bütün növlər</option></select>
+            <input type="date" id="filtrTarixBaslangic" />
+            <input type="date" id="filtrTarixSon" />
+          </div>
+        </div>
+
+        <form class="sual-formu" id="sualFormu">
+          <label class="sened-at-duyme" for="faylSecici" title="Sənəd və ya Şəkil Əlavə Et">
+            📎
+          </label>
+          <button type="button" class="ses-duyme" id="btnSesliGiris" title="Səslə daxil et (Danışın)">
+            🎙️
+          </button>
+          <textarea
+            id="sualInput"
+            rows="1"
+            placeholder="Sualınızı yazın və ya mikrofonla səsləndirin..."
+          ></textarea>
+          <button type="submit" class="gonder-duyme" id="btnGonder" title="Göndər">
+            ➤
+          </button>
+        </form>
+      </div>
+    </section>
+
+    <!-- SAĞ PANEL: Sitat və Mənbə İzləyicisi (Defoltdan GİZLİDİR!) -->
+    <aside class="sag-panel gizli" id="sagPanel">
+      <div class="sag-ust-basliq">
+        <div class="sag-tablar">
+          <button class="sag-tab aktiv" data-tab="sitatTab">📑 Sitat İzləyici</button>
+          <button class="sag-tab" data-tab="yaddasTab">🧠 Yaddaş (<span id="yaddasTabSay">0</span>)</button>
+        </div>
+        <button class="panel-bagla-btn" id="btnPanelBagla" title="Paneli gizlət">✕</button>
+      </div>
+
+      <!-- TAB 1: Sitat və Mənbə Baxışı + Qlobal Baza Axtarışı -->
+      <div class="sag-tab-mezmun aktiv" id="sitatTab">
+        <div class="daxili-axtaris-qutu" style="padding:10px 12px 4px 12px; border-bottom:1px solid var(--serhed);">
+          <input
+            type="text"
+            id="globalBazaAxtaris"
+            placeholder="🔍 Bütün bazada maddə / bənd / söz axtar (məs: 102.1.30, 175.8, POS)..."
+            style="width:100%; background:var(--bg-input); color:var(--metn-esas); border:1px solid var(--serhed); border-radius:8px; padding:7px 10px; font-size:12px;"
+          />
+        </div>
+        <div id="globalAxtarisNeticeleri" hidden style="padding:10px 12px; border-bottom:1px solid var(--serhed); max-height:320px; overflow-y:auto;"></div>
+        <div id="sitatOnizlemeQutusu" class="sitat-onizleme-bos">
+          <div class="bos-ikon">🔍</div>
+          <h3>Mənbə və Sitat Baxışı</h3>
+          <p>Yuxarıdakı axtarış qutusundan bütün bazada maddə axtara və ya cavablardakı sitatlara klikləyə bilərsiniz.</p>
+        </div>
+      </div>
+
+      <!-- TAB 2: Şəxsi Yaddaş -->
+      <div class="sag-tab-mezmun" id="yaddasTab">
+        <form class="yaddas-elave-form" id="yaddasForm">
+          <div class="yaddas-form-ust" style="display:flex; gap:6px; align-items:center;">
+            <select id="yaddasKat">
+              <option value="fakt">📌 Fakt</option>
+              <option value="qayda">⚙️ Qayda</option>
+              <option value="tapşırıq">✅ Tapşırıq</option>
+              <option value="şəxs">👤 Şəxs</option>
+            </select>
+            <button type="submit" class="kicik-duyme esas">+ Əlavə et</button>
+            <button type="button" class="kicik-duyme" id="btnYaddasEndir" title="Öyrədilmiş bütün Qızıl Qaydaları kompüterə endir (.md)" style="background:rgba(56,189,248,0.12); color:#38bdf8; border:1px solid rgba(56,189,248,0.3);">📥 Yedəklə</button>
+          </div>
+          <input type="text" id="yaddasMetn" placeholder="Məs: Həmişə 18% ƏDV-ni ayrıca göstər..." required />
+        </form>
+        <div class="yaddas-siyahisi" id="yaddasSiyahisi"></div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- MODALLAR -->
+  <div class="modal-arka" id="modalTenzimlemeler" hidden>
+    <div class="modal-qutu">
+      <div class="modal-basliq">
+        <h2>⚙️ AI Tənzimləmələri</h2>
+        <button class="modal-bagla" data-close="modalTenzimlemeler">✕</button>
+      </div>
+      <form id="formTenzimlemeler" class="modal-govde">
+        <div class="form-qrup">
+          <label>AI Provayderi:</label>
+          <select id="tenzProvayder">
+            <option value="gemini">Google Gemini API (Tövsiyə olunur)</option>
+            <option value="groq">Groq Cloud API</option>
+            <option value="ollama">Lokal Ollama</option>
+          </select>
+        </div>
+        <div id="qrupGemini">
+          <div class="form-qrup">
+            <label>Gemini API Key (Google AI Studio — "AIzaSy..." ilə başlayır):</label>
+            <input type="password" id="tenzGeminiKey" placeholder="AIzaSy..." />
+          </div>
+          <div class="form-qrup" style="margin-top:8px;">
+            <label>Gemini Model:</label>
+            <input type="text" id="tenzGeminiModel" placeholder="gemini-3-flash-preview" />
+          </div>
+        </div>
+        <div id="qrupGroq" style="display:none;">
+          <div class="form-qrup">
+            <label>Groq API Key ("gsk_..." ilə başlayır):</label>
+            <input type="password" id="tenzGroqKey" placeholder="gsk_..." />
+          </div>
+          <div class="form-qrup" style="margin-top:8px;">
+            <label>Groq Model:</label>
+            <input type="text" id="tenzGroqModel" placeholder="llama-3.3-70b-versatile" />
+          </div>
+        </div>
+        <div id="qrupOllama" style="display:none;">
+          <div class="form-qrup">
+            <label>Lokal Ollama Ünvanı (URL):</label>
+            <input type="text" id="tenzOllamaUrl" placeholder="http://127.0.0.1:11434" />
+          </div>
+          <div class="form-qrup" style="margin-top:8px;">
+            <label>Ollama Model:</label>
+            <input type="text" id="tenzOllamaModel" placeholder="llama3.2" />
+          </div>
+        </div>
+        <div class="form-qrup">
+          <label>📱 Telegram Bot Token (Mobil İkinci Beyin):</label>
+          <input type="password" id="tenzTgToken" placeholder="BotFather-dən alınan token (123456:ABC...)" />
+        </div>
+        <div class="form-qrup">
+          <label>Sistem Təlimatı:</label>
+          <textarea id="tenzSistemTelimati" rows="2"></textarea>
+        </div>
+        <div class="modal-ayaq">
+          <button type="submit" class="duyme esas">Yadda Saxla</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-arka" id="modalLink" hidden>
+    <div class="modal-qutu modal-kicik">
+      <div class="modal-basliq">
+        <h2>🔗 Link Əlavə Et</h2>
+        <button class="modal-bagla" data-close="modalLink">✕</button>
+      </div>
+      <form id="formLink" class="modal-govde">
+        <label>URL Ünvanı:</label>
+        <input type="url" id="inputLinkUrl" placeholder="https://..." required />
+        <div id="linkXetaQutusu" style="display:none; background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.4); color:#fca5a5; padding:10px 12px; border-radius:8px; font-size:12px; line-height:1.5;"></div>
+        <div class="modal-ayaq">
+          <button type="submit" class="duyme esas" id="btnLinkElaveEt">Yoxla və Əlavə et</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-arka" id="modalMetn" hidden>
+    <div class="modal-qutu">
+      <div class="modal-basliq">
+        <h2>📋 Qeyd və ya Mətn Yapışdır</h2>
+        <button class="modal-bagla" data-close="modalMetn">✕</button>
+      </div>
+      <form id="formMetn" class="modal-govde">
+        <label>Başlıq:</label>
+        <input type="text" id="inputMetnBasliq" placeholder="Məs: Vergi Qeydləri" required />
+        <label style="margin-top:8px;">Mətn:</label>
+        <textarea id="inputMetnIcerik" rows="8" placeholder="Mətni bura yapışdırın..." required></textarea>
+        <div class="modal-ayaq">
+          <button type="submit" class="duyme esas">Əlavə et</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Gizli Köməkçilər -->
+  <div id="bildirisQutusu" class="bildiris-qutusu" hidden></div>
+  <div id="modalBaglantilar" hidden><input type="text" id="bagTgToken" /><button id="btnTgQos"></button><span id="tgStatusEtiket"></span><span id="nlmKorpuStatusEtiket"></span><button id="btnBookmarkletKopyala"></button><a id="wpBookmarkletLink" href="#"></a><div id="tgMelumatQutusu"></div></div>
+
+  <script src="/app.js?v=3.4"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const btnToggle = document.getElementById("btnPanelToggle");
+      const btnBagla = document.getElementById("btnPanelBagla");
+      const sagPanel = document.getElementById("sagPanel");
+      if (btnToggle && sagPanel) {
+        btnToggle.addEventListener("click", () => {
+          sagPanel.classList.toggle("gizli");
+        });
+      }
+      if (btnBagla && sagPanel) {
+        btnBagla.addEventListener("click", () => {
+          sagPanel.classList.add("gizli");
+        });
+      }
+    });
+  </script>
+</body>
+</html>
