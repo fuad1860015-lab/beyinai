@@ -460,20 +460,32 @@ async function llmCagir({ sistemPromptu, istifadeciPromptu, geminiFileParts = []
   const aktivDerinRejim = derinRejim !== null ? Boolean(derinRejim) : (t.derin_rejim !== "0");
   llmCagir.sonMelumat = { daxiliDusunce: "", model: "", derinRejim: aktivDerinRejim, xeta: "" };
 
-  // 1) GOOGLE GEMINI FILE API & DEEP THINKING ENGINE
-  if (t.gemini_api_key && provayder === "gemini") {
-    const key = t.gemini_api_key.trim();
-    const modeller = geminiModelSiyahisiAl(t.gemini_model, aktivDerinRejim);
+  // 1) GOOGLE GEMINI (AI Studio AIza... VƏ YA Vertex AI Express AQ....) & DEEP THINKING ENGINE
+  const geminiKey = (t.gemini_api_key || process.env.GEMINI_API_KEY || "").trim();
+  if (geminiKey && provayder === "gemini") {
+    const key = geminiKey;
+    const isVertexKey = key.startsWith("AQ.");
+    const modeller = isVertexKey
+      ? Array.from(new Set([
+          "gemini-2.5-flash",
+          "gemini-2.5-flash-lite",
+          "gemini-2.0-flash",
+          "gemini-2.5-pro",
+          ...geminiModelSiyahisiAl(t.gemini_model, aktivDerinRejim)
+        ]))
+      : geminiModelSiyahisiAl(t.gemini_model, aktivDerinRejim);
 
-    const userParts = [
-      ...geminiFileParts.map(f => ({
-        fileData: {
-          mimeType: f.mimeType,
-          fileUri: f.uri
-        }
-      })),
-      { text: istifadeciPromptu }
-    ];
+    const userParts = isVertexKey
+      ? [{ text: istifadeciPromptu }]
+      : [
+          ...geminiFileParts.map(f => ({
+            fileData: {
+              mimeType: f.mimeType,
+              fileUri: f.uri
+            }
+          })),
+          { text: istifadeciPromptu }
+        ];
 
     const contents = [
       ...tarixce.slice(-4).map(m => ({
@@ -488,7 +500,7 @@ async function llmCagir({ sistemPromptu, istifadeciPromptu, geminiFileParts = []
 
     for (const model of modeller) {
       try {
-        const dusunmeDestekleyir = model !== "gemini-flash-lite-latest";
+        const dusunmeDestekleyir = !isVertexKey && model !== "gemini-flash-lite-latest";
         const generationConfig = {
           temperature: aktivDerinRejim ? 0.12 : 0.15,
           maxOutputTokens: aktivDerinRejim ? 5120 : 4096
@@ -501,19 +513,20 @@ async function llmCagir({ sistemPromptu, istifadeciPromptu, geminiFileParts = []
         }
 
         const timeoutMs = aktivDerinRejim ? 32000 : 20000;
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              systemInstruction: { parts: [{ text: sistemPromptu }] },
-              contents,
-              generationConfig
-            }),
-            signal: AbortSignal.timeout(timeoutMs)
-          }
-        );
+        const apiUrl = isVertexKey
+          ? `https://aiplatform.googleapis.com/v1/publishers/google/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`
+          : `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
+
+        const res = await fetch(apiUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: sistemPromptu }] },
+            contents,
+            generationConfig
+          }),
+          signal: AbortSignal.timeout(timeoutMs)
+        });
 
         if (res.ok) {
           const data = await res.json();
@@ -532,7 +545,7 @@ async function llmCagir({ sistemPromptu, istifadeciPromptu, geminiFileParts = []
           if (cavab) {
             llmCagir.sonMelumat = {
               daxiliDusunce: dusunceMetni,
-              model,
+              model: isVertexKey ? `Vertex AI (${model})` : model,
               derinRejim: aktivDerinRejim,
               xeta: ""
             };
@@ -541,9 +554,10 @@ async function llmCagir({ sistemPromptu, istifadeciPromptu, geminiFileParts = []
         } else if (res.status === 400 || res.status === 401 || res.status === 403) {
           const errText = await res.text().catch(() => "");
           if (/API_KEY_INVALID|API key not valid|PERMISSION_DENIED/i.test(errText)) {
-            llmCagir.sonMelumat.xeta =
-              "Gemini API açarı keçərsizdir (Google AI Studio açarları 'AIzaSy...' ilə başlamalıdır). Tənzimləmələrdən düzgün açar daxil edin.";
-            break; // Digər Gemini modellərini boş yerə yoxlama!
+            llmCagir.sonMelumat.xeta = isVertexKey
+              ? `Vertex AI açarı xətası (${res.status}): ${errText.slice(0, 140)}`
+              : "Gemini API açarı keçərsizdir. Tənzimləmələrdən düzgün açar daxil edin.";
+            break;
           }
         }
       } catch (_) {
