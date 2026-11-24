@@ -107,7 +107,7 @@ async function menbeVektorlashdir(menbeDetali) {
   const key = (t.gemini_api_key || process.env.GEMINI_API_KEY || "").trim();
   const gecerliGeminiKey = key.length >= 20;
 
-  if (gecerliGeminiKey && key.startsWith("AIza")) {
+  if (gecerliGeminiKey) {
     try {
       await geminiFiles.menbeniGeminiIleSinxronEt(menbeDetali, key);
     } catch (_) {}
