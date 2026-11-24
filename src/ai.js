@@ -575,8 +575,9 @@ async function llmCagir({ sistemPromptu, istifadeciPromptu, geminiFileParts = []
     return data?.message?.content || "";
   }
 
-  // 3) GROQ API
-  if (t.groq_api_key && (provayder === "groq" || !t.gemini_api_key)) {
+  // 3) GROQ API (provayder groq-dursa VƏ YA Gemini uğursuz oldusa ehtiyat kimi!)
+  const groqKey = (t.groq_api_key || process.env.GROQ_API_KEY || "").trim();
+  if (groqKey && (provayder === "groq" || !t.gemini_api_key || llmCagir.sonMelumat.xeta)) {
     const model = t.groq_model || "llama-3.3-70b-versatile";
     const mesajlar = [
       { role: "system", content: sistemPromptu },
@@ -584,19 +585,34 @@ async function llmCagir({ sistemPromptu, istifadeciPromptu, geminiFileParts = []
       { role: "user", content: istifadeciPromptu }
     ];
 
-    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${t.groq_api_key.trim()}`
-      },
-      body: JSON.stringify({ model, messages: mesajlar, temperature: 0.2, max_tokens: 4096 }),
-      signal: AbortSignal.timeout(35000)
-    });
-    if (res.ok) {
-      const data = await res.json();
-      const cavab = data?.choices?.[0]?.message?.content;
-      if (cavab) return cavab;
+    try {
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${groqKey}`
+        },
+        body: JSON.stringify({ model, messages: mesajlar, temperature: 0.15, max_tokens: 4096 }),
+        signal: AbortSignal.timeout(35000)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const cavab = data?.choices?.[0]?.message?.content;
+        if (cavab) {
+          llmCagir.sonMelumat = {
+            daxiliDusunce: "",
+            model: `Groq (${model})`,
+            derinRejim: aktivDerinRejim,
+            xeta: ""
+          };
+          return cavab;
+        }
+      } else {
+        const errTxt = await res.text().catch(() => "");
+        llmCagir.sonMelumat.xeta = `Groq API xətası (${res.status}): ${errTxt.slice(0, 140)}`;
+      }
+    } catch (e) {
+      llmCagir.sonMelumat.xeta = `Groq əlaqə xətası: ${e.message}`;
     }
   }
 
