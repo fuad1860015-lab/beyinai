@@ -123,12 +123,12 @@ function ustPanelDurumYenile() {
     etiket.textContent = `Ollama (${t.ollama_model || "Lokal"})`;
   } else if (t.ai_provayder === "groq" && t.groq_api_key) {
     etiket.textContent = "Groq AI ✓";
-  } else if (t.gemini_api_key && t.gemini_api_key.trim().startsWith("AIza")) {
+  } else if (t.gemini_api_key && t.gemini_api_key.trim().length >= 20) {
     etiket.textContent = derinAktiv ? "Gemini 3 • Dərin Zəka ✓" : "Gemini 3 • Sürətli ✓";
-  } else if (t.gemini_api_key) {
+  } else if (t.gemini_api_key && t.gemini_api_key.trim().length > 0) {
     etiket.textContent = "Gemini • Açar Yanlışdır ⚠️";
   } else {
-    etiket.textContent = "Pulsuz Bulud AI (Aktiv ✓)";
+    etiket.textContent = "Gemini 3 Flash";
   }
 
   const tgAktiv = veziyyet.baglantilar?.telegram?.aktiv;
