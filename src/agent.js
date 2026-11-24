@@ -698,12 +698,12 @@ async function agentSualCavabla({
 
   // Kassa çeki (NKA çeki) sualında "Kassa metodu (Maddə 130–133)" kimi tam başqa mövzunun sitatlarını süz
   const isKassaCekiSuali = /kassa\s*çeki|kassa\s*ceki|nka\s*çeki|nka\s*ceki/i.test(sual) && !/kassa\s*metod/i.test(sual);
-  if (isKassaCekiSuali) {
-    tapilanParcalar = tapilanParcalar.filter(p => !/Maddə\s*13[0-3]\b|kassa\s*metodu/i.test(`${p.basliq || ""} ${(p.metn || "").slice(0, 220)}`));
-  }
+  const sonParcalar = isKassaCekiSuali
+    ? tapilanParcalar.filter(p => !/Maddə\s*13[0-3]\b|kassa\s*metodu/i.test(`${p.basliq || ""} ${(p.metn || "").slice(0, 220)}`))
+    : tapilanParcalar;
 
   // Sitatları nömrələ və hüquqi dərəcəsini əlavə et
-  const sitatlar = tapilanParcalar.map((p, idx) => {
+  const sitatlar = sonParcalar.map((p, idx) => {
     const huquq = menbeHuquqiDerecesi(p);
     return {
       nomre: idx + 1,
