@@ -118,34 +118,93 @@ function telegramCavabiFormatla(xamMetn, sitatlar = []) {
   };
 }
 
-async function tgMesajGonder(token, chatId, metn, secimler = {}) {
-  try {
-    const body = {
-      chat_id: chatId,
-      text: metn.slice(0, 4000),
-      parse_mode: "HTML",
-      ...secimler
-    };
-    let res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+// Uzun Telegram mesajlarını 3800 simvol limitinə görə sətir/abzas sonlarından səliqəli bölür (HTML teqlərini qırmadan!)
+function tgMesajiHisselereBol(metn, maks = 3800) {
+  const tam = String(metn || "").trim();
+  if (!tam) return [];
+  if (tam.length <= maks) return [tam];
+
+  const hisseler = [];
+  let qalan = tam;
+
+  while (qalan.length > maks) {
+    let kesim = qalan.lastIndexOf("\n\n", maks);
+    if (kesim < Math.floor(maks * 0.45)) {
+      kesim = qalan.lastIndexOf("\n", maks);
+    }
+    if (kesim < Math.floor(maks * 0.45)) {
+      kesim = qalan.lastIndexOf(" ", maks);
+    }
+    if (kesim <= 0) {
+      kesim = maks;
+    }
+
+    hisseler.push(qalan.slice(0, kesim).trim());
+    qalan = qalan.slice(kesim).trim();
+  }
+  if (qalan) hisseler.push(qalan);
+  return hisseler;
+}
+
+async function tgTekMesajGonder(token, chatId, parcaMetn, secimler = {}) {
+  const body = {
+    chat_id: chatId,
+    text: parcaMetn,
+    parse_mode: "HTML",
+    ...secimler
+  };
+  let res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(12000)
+  });
+  let data = await res.json();
+  if (!data.ok && data.description?.includes("can't parse entities")) {
+    delete body.parse_mode;
+    body.text = parcaMetn.replace(/<[^>]+>/g, "");
+    res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(10000)
+      signal: AbortSignal.timeout(12000)
     });
-    let data = await res.json();
-    if (!data.ok && data.description?.includes("can't parse entities")) {
-      delete body.parse_mode;
-      body.text = metn.replace(/<[^>]+>/g, "").slice(0, 4000);
-      res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(10000)
-      });
-      data = await res.json();
+    data = await res.json();
+  }
+  return data;
+}
+
+async function tgMesajGonder(token, chatId, metn, secimler = {}) {
+  try {
+    const hisseler = tgMesajiHisselereBol(metn, 3800);
+    let sonCavab = null;
+    for (let i = 0; i < hisseler.length; i++) {
+      const sonuncudur = i === hisseler.length - 1;
+      // Düymələri (reply_markup) yalnız sonuncu hissənin altına qoy
+      sonCavab = await tgTekMesajGonder(token, chatId, hisseler[i], sonuncudur ? secimler : {});
     }
-    return data;
+    return sonCavab;
   } catch (_) {}
+}
+
+async function tgSenedGonder(token, chatId, buffer, faylAdi, caption = "") {
+  try {
+    const formData = new FormData();
+    formData.append("chat_id", String(chatId));
+    formData.append("document", new Blob([buffer], { type: "application/octet-stream" }), faylAdi);
+    if (caption) {
+      formData.append("caption", caption.slice(0, 1024));
+      formData.append("parse_mode", "HTML");
+    }
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
+      method: "POST",
+      body: formData,
+      signal: AbortSignal.timeout(30000)
+    });
+    return await res.json();
+  } catch (e) {
+    return { ok: false, description: e.message };
+  }
 }
 
 // Canlı gələn mesajı Mərkəzi Beyinə əlavə edir (Yaxın vaxtda gələn ardıcıl Forward müzakirələrini vahid "Praktiki Keys" blokunda birləşdirir!)
@@ -290,18 +349,91 @@ async function tgUpdateEmalEt(token, update) {
       } else if (cbChatId) {
         await tgMesajGonder(token, cbChatId, "ℹ️ Bu sualın detallı təhlili üçün sualı yenidən göndərə bilərsiniz.");
       }
+    } else if (data.startsWith("tts_")) {
+      const detalId = data.replace("tts_", "");
+      const qeyd = tgDetalliYaddas.get(detalId);
+      if (qeyd && cbChatId) {
+        try {
+          const tts = require("./tts");
+          await tgMesajGonder(token, cbChatId, "🎙️ Səsli mesaj hazırlanır...");
+          const audioBuf = await tts.metniSeseCevir(qeyd.qisa || qeyd.metn);
+          await tts.tgSesliMesajGonder(token, cbChatId, audioBuf, "🎙️ Səsli Cavab (BeyinAI)");
+        } catch (err) {
+          await tgMesajGonder(token, cbChatId, `⚠️ Səs yaradılarkən xəta: ${err.message}`);
+        }
+      }
     } else if (data.startsWith("ok_")) {
       const detalId = data.replace("ok_", "");
       const qeyd = tgDetalliYaddas.get(detalId);
       if (qeyd && cbChatId && typeof db.praktikaKeysElaveEt === "function") {
+        const temizCavab = (qeyd.qisa || qeyd.metn || "").replace(/<[^>]+>/g, "");
         db.praktikaKeysElaveEt({
           basliq: `✅ Təsdiqlənmiş Keys: ${(qeyd.sual || "").slice(0, 75)}`,
           sual: qeyd.sual || "Telegram Ekspert Sualı",
-          cavab: (qeyd.qisa || qeyd.metn || "").replace(/<[^>]+>/g, ""),
+          cavab: temizCavab,
           gonderen: "Telegram Ekspert Təsdiqi",
           nov: "tesdiq"
         });
-        await tgMesajGonder(token, cbChatId, "✅ <b>Təsdiqləndi!</b> Bu cavab etalon praktiki keys kimi <b>Mühasibatlıq Praktikası və Təcrübə Bankı</b>na əlavə olundu.");
+
+        // Həmçinin Yaddaşa Qızıl Qayda kimi əlavə edərək gələcək suallarda prioritet verək
+        if (typeof db.yaddasElaveEt === "function" && qeyd.sual && qeyd.sual.length > 10) {
+          db.yaddasElaveEt({
+            kateqoriya: "qayda",
+            metn: `QIZIL QAYDA (Ekspert Təsdiqi): Mövzu: "${qeyd.sual.slice(0, 100)}" → Nəticə: ${temizCavab.slice(0, 250)}`,
+            menbe: "Telegram Ekspert Təsdiqi",
+            vaciblik: 5
+          });
+        }
+
+        await tgMesajGonder(
+          token,
+          cbChatId,
+          "✅ <b>Təsdiqləndi və Yaddaşa Həkk Olundu!</b>\nBu cavab həm <b>Təcrübə Bankı</b>na etalon keys kimi yazıldı, həm də gələcək suallar üçün <b>Daimi Qızıl Qayda</b> kimi qeyd edildi."
+        );
+      }
+    } else if (data.startsWith("bad_")) {
+      const detalId = data.replace("bad_", "");
+      const qeyd = tgDetalliYaddas.get(detalId);
+      if (qeyd && qeyd.sual && cbChatId) {
+        await tgMesajGonder(token, cbChatId, "🔄 <b>Sualınız yenidən oxunur və daha dərindən (fərqli bucaqdan + Tənqidçi Müfəttişlə) təkrar araşdırılır...</b>");
+        try {
+          const agent = require("./agent");
+          const yeniNet = await agent.agentSualCavabla({
+            sual: qeyd.sual,
+            qovluq_id: "all",
+            derin_rejim: true,
+            yenidenArasdir: true,
+            evvelkiCavab: qeyd.qisa || qeyd.metn || ""
+          });
+          const formatlanmis = telegramCavabiFormatla(yeniNet.cavab.metn, yeniNet.sitatlar);
+          const yeniId = crypto.randomUUID().slice(0, 8);
+          tgDetalliYaddas.set(yeniId, {
+            vaxt: Date.now(),
+            sual: qeyd.sual,
+            qisa: formatlanmis.qisa,
+            metn: formatlanmis.genis || formatlanmis.qisa
+          });
+          const duymeler = [];
+          if (formatlanmis.genis) {
+            duymeler.push([{ text: "🔍 Geniş Təhlil və Praktiki Nümunə", callback_data: `det_${yeniId}` }]);
+          }
+          duymeler.push([
+            { text: "🎙️ Səslə Dinlə", callback_data: `tts_${yeniId}` },
+            { text: "👍 Doğrudur", callback_data: `ok_${yeniId}` },
+            { text: "👎 Bəyənmədim", callback_data: `bad_${yeniId}` }
+          ]);
+          const etibarSetri = yeniNet.etibarliliq ? `\n\n🛡️ <b>Etibarlılıq:</b> ${yeniNet.etibarliliq}` : "";
+          await tgMesajGonder(
+            token,
+            cbChatId,
+            `🔄 <b>Yenidən Dərin Araşdırma Nəticəsi:</b>\n\n${formatlanmis.qisa}${etibarSetri}`,
+            { reply_markup: { inline_keyboard: duymeler } }
+          );
+        } catch (err) {
+          await tgMesajGonder(token, cbChatId, `⚠️ Yenidən araşdırma zamanı xəta: ${err.message}`);
+        }
+      } else if (cbChatId) {
+        await tgMesajGonder(token, cbChatId, "ℹ️ Bu sualın müddəti bitib — zəhmət olmasa sualı yenidən yazın.");
       }
     }
     return;
@@ -340,11 +472,190 @@ async function tgUpdateEmalEt(token, update) {
     await tgMesajGonder(
       token,
       chatId,
-      "🧠 Salam! Mən sizin Şəxsi AI Agentiniz və İkinci Beyninizəm.\n\n" +
-      "Mənə istənilən mövzuda (Hüquq, Konstitusiya, Vergi/Mühasibatlıq, Fəlsəfə, Dünyagörüşü, Kitablar və Sənədlər) sual yaza, səsli mesaj ata və ya oxunması üçün PDF/Word faylları göndərə bilərsiniz.\n\n" +
-      "📌 <b>Birbaşa yaddaşa qayda/qeyd yazmaq üçün:</b> <code>/qeyd Mətn...</code> yazın.\n" +
-      "💼 <b>Qrup Təcrübələri / Keyslər:</b> Digər Telegram qruplarından maraqlı mühasib müzakirələrini bura Forward etsəniz, avtomatik <b>Mühasibatlıq Praktikası Bankına</b> yazılacaq və gələcək suallarınızda nəzərə alınacaq!"
+      "🧠 Salam! Mən sizin Şəxsi AI Agentiniz və Mühasibatlıq Köməkçinizəm.\n\n" +
+      "Mənə istənilən mövzuda (Vergi, Əmək, Mühasibatlıq, Sənədlər) sual verə, səsli mesaj ata və ya PDF/Word sənədləri göndərə bilərsiniz.\n\n" +
+      "📌 <b>Xüsusi İmkanlar və Komandalar:</b>\n" +
+      "• 🧮 <b>Kalkulyator:</b> <code>hesabla maaş 1500 net</code> və ya <code>hesabla məzuniyyət 1200 maaş 21 gün</code>\n" +
+      "• 📰 <b>Həftəlik Bülleten:</b> <code>/bulleten</code> — Qruplardan toplanmış canlı keyslərin icmalı\n" +
+      "• 📉 <b>Bilik Boşluqları:</b> <code>/bosluqlar</code> — Bazada sənəd çatışmayan mövzuların hesabatı\n" +
+      "• 🧬 <b>Yaddaş Konsolidasiyası:</b> <code>/yaddas_temizle</code> — Dublikat və ziddiyyətli qeydləri birləşdir\n" +
+      "• 🧠 <b>Semantik Vektor İndeksi:</b> <code>/vektor_yenile</code> — Bütün bazanı məna üzrə indekslə\n" +
+      "• 💾 <b>Baza Yedəkləməsi:</b> <code>/backup</code> — SQLite bazasını ehtiyat fayl kimi göndər\n" +
+      "• 🎙️ <b>Səsli Cavab:</b> Cavabın altındakı <code>[🎙️ Səslə Dinlə]</code> düyməsi ilə audio dinləmə\n" +
+      "• ℹ️ <b>Sistem Statusu:</b> <code>/status</code> və ya <code>/versiya</code>\n" +
+      "• 📌 <b>Şəxsi Qayda Qeydi:</b> <code>/qeyd Mətn...</code>\n\n" +
+      "💼 <b>Qrup Təcrübələri:</b> Digər Telegram qruplarındakı maraqlı mühasib müzakirələrini bura Forward etsəniz, avtomatik <b>Mühasibatlıq Praktikası Bankına</b> yazılacaq!"
     );
+    return;
+  }
+
+  // Versiya və Sistem Statusu Yoxlanışı
+  if (metn === "/versiya" || metn === "/status" || metn === "/ver") {
+    const stat = db.statistikaAl();
+    const vekStat = db.vektorStatistikasiAl();
+    const tenz = db.tenzimlemeleriAl();
+    await tgMesajGonder(
+      token,
+      chatId,
+      `🤖 <b>BeyinAI Sistem Statusu:</b>\n\n` +
+      `🏷️ <b>Versiya:</b> v3.0 (24 Noyabr 2026)\n` +
+      `🧠 <b>AI Modeli:</b> ${tenz.gemini_model || "gemini-3-flash-preview"}\n` +
+      `⚡ <b>Mühərrik:</b> ReAct Multi-Query + 2-Mərhələli Tənqidçi Müfəttiş (Critic Pass)\n` +
+      `🛡️ <b>Server Qalxanı:</b> Rate-Limit + Təhlükəsiz Başlıqlar + Global Qoruyucu\n` +
+      `⚖️ <b>Qanun vs Praktika Detektoru:</b> Aktiv\n` +
+      `🧬 <b>Yaddaşın Özünü-Təmizləməsi:</b> Aktiv (/yaddas_temizle)\n` +
+      `📉 <b>Bilik Boşluğu İzləməsi:</b> Aktiv (/bosluqlar)\n` +
+      `💾 <b>1-Kliklə Baza Backup:</b> Aktiv (/backup)\n\n` +
+      `📊 <b>Baza Statistikası:</b>\n` +
+      `  • 📁 Qovluqlar: ${stat.qovluqSayi || 0}\n` +
+      `  • 📄 Mənbələr / Sənədlər: ${stat.menbeSayi || 0}\n` +
+      `  • 🧩 İndekslənmiş Hissələr: ${stat.parcaSayi || 0}\n` +
+      `  • 🧬 Semantik Vektorlu: ${vekStat.vektorlu} / ${vekStat.cemi} (${vekStat.faiz}%)\n` +
+      `  • 🧠 Şəxsi Yaddaş Faktları: ${stat.yaddasSayi || 0}\n` +
+      `  • 📉 Açıq Bilik Boşluqları: ${stat.bosluqSayi || 0}\n\n` +
+      `✅ <i>Bütün modullar aktiv və problemsiz işləyir!</i>`
+    );
+    return;
+  }
+
+  // 1-Kliklə Baza Yedəkləmə (/backup)
+  if (metn === "/backup" || metn === "/yedek") {
+    await tgMesajGonder(token, chatId, "💾 <b>Baza ehtiyat nüsxəsi hazırlanır...</b> (SQLite WAL birləşdirilir)");
+    try {
+      const bkp = db.bazaBackupHazirla();
+      const stat = db.statistikaAl();
+      const olcuMb = (bkp.olcu / (1024 * 1024)).toFixed(2);
+      const res = await tgSenedGonder(
+        token,
+        chatId,
+        bkp.buffer,
+        bkp.faylAdi,
+        `💾 <b>BeyinAI Baza Ehtiyat Nüsxəsi</b>\n` +
+        `• 📦 Ölçü: <b>${olcuMb} MB</b>\n` +
+        `• 📄 Mənbələr: ${stat.menbeSayi} | 🧩 Hissələr: ${stat.parcaSayi}\n` +
+        `• 🧠 Yaddaş Qaydaları: ${stat.yaddasSayi}\n` +
+        `✅ <i>Bu faylı saxlayın — istənilən vaxt bütün biliklərinizi 100% bərpa edə bilərsiniz.</i>`
+      );
+      if (!res || !res.ok) {
+        await tgMesajGonder(token, chatId, `⚠️ Backup göndərilərkən xəta: ${res?.description || "Naməlum xəta"}`);
+      }
+    } catch (e) {
+      await tgMesajGonder(token, chatId, `⚠️ Backup hazırlanarkən xəta: ${e.message}`);
+    }
+    return;
+  }
+
+  // Tam Semantik Vektor İndeksləməsi (/vektor_yenile və /vektor_status)
+  if (metn === "/vektor_status") {
+    const v = ai.vektorIsiVeziyyetiAl();
+    await tgMesajGonder(
+      token,
+      chatId,
+      `🧬 <b>Semantik Vektor Statusu:</b>\n\n` +
+      `• 📊 Vektorlu hissələr: <b>${v.baza.vektorlu} / ${v.baza.cemi} (${v.baza.faiz}%)</b>\n` +
+      `• ⏳ Qalan hissələr: <b>${v.baza.qaliq}</b>\n` +
+      `• ⚙️ Aktiv proses: <b>${v.gedir ? `İşləyir (${v.hazir}/${v.cemi})` : "Gözləmədə"}</b>`
+    );
+    return;
+  }
+
+  if (metn === "/vektor_yenile" || metn === "/vektor") {
+    const vekStat = db.vektorStatistikasiAl();
+    if (vekStat.qaliq === 0) {
+      await tgMesajGonder(token, chatId, `✅ <b>Bazadakı bütün ${vekStat.cemi} parça artıq 100% semantik vektorlaşdırılıb!</b>`);
+      return;
+    }
+    await tgMesajGonder(
+      token,
+      chatId,
+      `🧠 <b>Tam Semantik Vektor İndeksləməsi Başladıldı!</b>\n` +
+      `• 📊 İndekslənəcək: <b>${vekStat.qaliq}</b> parça (Cəmi: ${vekStat.cemi})\n` +
+      `• ⏳ Proses arxa planda təhlükəsiz partiyalarla gedir. Bitdikdə sizə hesabat göndəriləcək.\n` +
+      `<i>Gedişatı yoxlamaq üçün: <code>/vektor_status</code></i>`
+    );
+
+    ai.butunBazaniVektorlashdir({
+      batchOlcu: 5,
+      gecikmeMs: 250
+    }).then(net => {
+      tgMesajGonder(token, chatId, net.mesaj).catch(() => {});
+    }).catch(e => {
+      tgMesajGonder(token, chatId, `⚠️ Vektorlaşdırma xətası: ${e.message}`).catch(() => {});
+    });
+    return;
+  }
+
+  // Bilik Boşluqları Hesabatı (/bosluqlar)
+  if (metn === "/bosluqlar" || metn === "/boşluqlar") {
+    const bosluqlar = db.bilikBosluqlariniAl(15);
+    if (!bosluqlar || bosluqlar.length === 0) {
+      await tgMesajGonder(
+        token,
+        chatId,
+        `🟢 <b>Bilik Boşluğu Aşkarlanmayıb!</b>\n\nHal-hazırda bazada sənəd çatışmazlığı qeydə alınan açıq sual yoxdur. Yeni suallar verdikcə rəsmi mənbəsi zəif olan mövzular burada toplanacaq.`
+      );
+      return;
+    }
+
+    const siyahi = bosluqlar.map((b, idx) => {
+      const tarixStr = new Date(b.son_sorulma || b.yaradildi).toISOString().slice(0, 10);
+      return `${idx + 1}. <b>${b.movzu || b.sual.slice(0, 70)}</b>\n   <i>(Sorulma: ${b.say || 1} dəfə | Son tarix: ${tarixStr})</i>`;
+    }).join("\n\n");
+
+    await tgMesajGonder(
+      token,
+      chatId,
+      `📉 <b>Bilik Boşluqları Hesabatı (Bazada Sənəd Çatışmayan Mövzular):</b>\n\n` +
+      `Aşağıdakı <b>${bosluqlar.length}</b> mövzuda bazada rəsmi maddə və ya qeyd tapılmayıb:\n\n` +
+      `${siyahi}\n\n` +
+      `💡 <i>Bu mövzular üzrə PDF/Word sənəd yükləsəniz və ya <code>/qeyd [Qayda]</code> yazsanız, sistemin dəqiqliyi dərhal artacaq.\nSiyahını sıfırlamaq üçün: <code>/bosluqlar_temizle</code></i>`
+    );
+    return;
+  }
+
+  if (metn === "/bosluqlar_temizle") {
+    db.bilikBosluqlariniTemizle();
+    await tgMesajGonder(token, chatId, `🧹 <b>Bilik boşluqları siyahısı təmizləndi.</b>`);
+    return;
+  }
+
+  // Yaddaşın Özünü-Təmizləməsi (/yaddas_temizle)
+  if (metn === "/yaddas_temizle" || metn === "/konsolidasiya") {
+    await tgMesajGonder(token, chatId, "🧬 <b>Yaddaş Konsolidasiyası başlayır...</b> Dublikat və ziddiyyətli qeydlər yoxlanılır...");
+    try {
+      const consolidator = require("./memory-consolidator");
+      const net = await consolidator.yaddasiKonsolidasiyaEt({ aiIstifadeEt: true });
+      await tgMesajGonder(token, chatId, net.hesabat);
+    } catch (e) {
+      await tgMesajGonder(token, chatId, `⚠️ Konsolidasiya zamanı xəta: ${e.message}`);
+    }
+    return;
+  }
+
+  // Həftəlik Mühasibat Təcrübə Bülleteni Komandası
+  if (metn === "/bulleten" || metn === "/icmal" || metn === "/bülleten") {
+    await tgMesajGonder(token, chatId, "📰 <b>Həftəlik Mühasibat və Vergi Təcrübəsi Bülleteni</b> toplanmış keyslər əsasında hazırlanır...");
+    try {
+      const bulleten = require("./bulleten");
+      const icmalMetni = await bulleten.heftelikBulletenHazirla();
+      const detalId = crypto.randomUUID().slice(0, 8);
+      tgDetalliYaddas.set(detalId, {
+        vaxt: Date.now(),
+        sual: "/bulleten",
+        qisa: icmalMetni,
+        metn: icmalMetni
+      });
+      const secimler = {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "🎙️ Səslə Dinlə", callback_data: `tts_${detalId}` }]
+          ]
+        }
+      };
+      await tgMesajGonder(token, chatId, icmalMetni, secimler);
+    } catch (e) {
+      await tgMesajGonder(token, chatId, `⚠️ Bülleten hazırlanarkən xəta: ${e.message}`);
+    }
     return;
   }
 
@@ -358,6 +669,28 @@ async function tgUpdateEmalEt(token, update) {
       vaciblik: 5
     });
     await tgMesajGonder(token, chatId, `📌 <b>Uzunmüddətli Yaddaşa əlavə olundu:</b>\n<i>"${qeydMetni}"</i>`);
+    return;
+  }
+
+  // 🧮 Mühasibat və Əməkhaqqı Kalkulyatoru Əmrləri
+  const calculator = require("./calculator");
+  if (calculator.kalkulyatorSorgusudurmu(metn) && !isForward) {
+    const cavab = calculator.kalkulyatorEmalEt(metn);
+    const detalId = crypto.randomUUID().slice(0, 8);
+    tgDetalliYaddas.set(detalId, {
+      vaxt: Date.now(),
+      sual: metn,
+      qisa: cavab.mesaj,
+      metn: cavab.mesaj
+    });
+    const secimler = {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🎙️ Səslə Dinlə", callback_data: `tts_${detalId}` }]
+        ]
+      }
+    };
+    await tgMesajGonder(token, chatId, cavab.mesaj, secimler);
     return;
   }
 
@@ -382,10 +715,15 @@ async function tgUpdateEmalEt(token, update) {
       if (formatlanmis.genis) {
         duymeler.push([{ text: "🔍 Geniş Təhlil və Praktiki Nümunə", callback_data: `det_${detalId}` }]);
       }
-      duymeler.push([{ text: "👍 Doğrudur (Təcrübə Bankına Qat)", callback_data: `ok_${detalId}` }]);
+      duymeler.push([
+        { text: "🎙️ Səslə Dinlə", callback_data: `tts_${detalId}` },
+        { text: "👍 Doğrudur", callback_data: `ok_${detalId}` },
+        { text: "👎 Bəyənmədim", callback_data: `bad_${detalId}` }
+      ]);
       const secimler = { reply_markup: { inline_keyboard: duymeler } };
+      const etibarSetri = nət.etibarliliq ? `\n\n🛡️ <b>Etibarlılıq:</b> ${nət.etibarliliq}` : "";
 
-      await tgMesajGonder(token, chatId, formatlanmis.qisa, secimler);
+      await tgMesajGonder(token, chatId, `${formatlanmis.qisa}${etibarSetri}`, secimler);
       return;
     } catch (e) {
       await tgMesajGonder(token, chatId, `⚠️ Xəta baş verdi: ${e.message}`);
@@ -462,27 +800,51 @@ async function tgUpdateEmalEt(token, update) {
 
       // Səsi dərhal cavablandır
       if (analiz.metn && analiz.metn.length > 3) {
+        // 🎙️ Səsli Kalkulyator Yoxlanışı (məs: "hesabla maaş 1500 net" səsli deyildikdə dərhal dəqiq hesabla!)
+        if (calculator.kalkulyatorSorgusudurmu(analiz.metn)) {
+          const kalkCavab = calculator.kalkulyatorEmalEt(analiz.metn);
+          await tgMesajGonder(token, chatId, `🎙️ Səsiniz:\n"${analiz.metn}"\n\n${kalkCavab.mesaj}`);
+          try {
+            const tts = require("./tts");
+            const audioBuf = await tts.metniSeseCevir(kalkCavab.mesaj);
+            await tts.tgSesliMesajGonder(token, chatId, audioBuf, "🎙️ Səsli Hesablama Nəticəsi");
+          } catch (_) {}
+          return;
+        }
+
         await tgMesajGonder(token, chatId, `🎙️ Səsiniz:\n"${analiz.metn}"\n\n🧠 Cavab hazırlanır...`);
         try {
           const agent = require("./agent");
           const netice = await agent.agentSualCavabla({ sual: analiz.metn, qovluq_id: "all" });
           const formatlanmis = telegramCavabiFormatla(netice.cavab.metn, netice.sitatlar);
 
-          const secimler = {};
+          const detalId = crypto.randomUUID().slice(0, 8);
+          tgDetalliYaddas.set(detalId, {
+            vaxt: Date.now(),
+            sual: analiz.metn,
+            qisa: formatlanmis.qisa,
+            metn: formatlanmis.genis || formatlanmis.qisa
+          });
+          const duymeler = [];
           if (formatlanmis.genis) {
-            const detalId = crypto.randomUUID().slice(0, 8);
-            tgDetalliYaddas.set(detalId, {
-              vaxt: Date.now(),
-              metn: formatlanmis.genis
-            });
-            secimler.reply_markup = {
-              inline_keyboard: [
-                [{ text: "🔍 Geniş Təhlil və Praktiki Nümunə", callback_data: `det_${detalId}` }]
-              ]
-            };
+            duymeler.push([{ text: "🔍 Geniş Təhlil və Praktiki Nümunə", callback_data: `det_${detalId}` }]);
           }
+          duymeler.push([
+            { text: "🎙️ Təkrar Dinlə", callback_data: `tts_${detalId}` },
+            { text: "👍 Doğrudur", callback_data: `ok_${detalId}` },
+            { text: "👎 Bəyənmədim", callback_data: `bad_${detalId}` }
+          ]);
+          const secimler = { reply_markup: { inline_keyboard: duymeler } };
 
-          await tgMesajGonder(token, chatId, formatlanmis.qisa, secimler);
+          const etibarSetri = netice.etibarliliq ? `\n\n🛡️ <b>Etibarlılıq:</b> ${netice.etibarliliq}` : "";
+          await tgMesajGonder(token, chatId, `${formatlanmis.qisa}${etibarSetri}`, secimler);
+
+          // Səsli suala avtomatik səsli cavab da göndər
+          try {
+            const tts = require("./tts");
+            const audioBuf = await tts.metniSeseCevir(formatlanmis.qisa);
+            await tts.tgSesliMesajGonder(token, chatId, audioBuf, "🎙️ Səsli Cavab (BeyinAI)");
+          } catch (_) {}
         } catch (_) {}
       } else {
         await tgMesajGonder(token, chatId, `🎙️ Səsli qeyd yaddaşa yazıldı.`);
@@ -650,6 +1012,7 @@ function veziyyetiAl() {
 module.exports = {
   tgBaslat,
   tgDayandir,
+  tgMesajiHisselereBol,
   canliMesajiBazayaYaz,
   veziyyetiAl
 };

@@ -88,6 +88,18 @@ db.exec(`
     acar TEXT PRIMARY KEY,
     deyer TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS bilik_bosluqlari (
+    id TEXT PRIMARY KEY,
+    sual TEXT NOT NULL,
+    movzu TEXT DEFAULT '',
+    menbe TEXT DEFAULT 'Söhbət',
+    say INTEGER DEFAULT 1,
+    status TEXT DEFAULT 'aciq',
+    yaradildi INTEGER NOT NULL,
+    son_sorulma INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_bosluq_status ON bilik_bosluqlari(status);
 `);
 
 function ilkinBazaHazirla() {
@@ -1111,16 +1123,97 @@ function sohbetleriTemizle(qovluq_id = "all") {
   return db.prepare("DELETE FROM sohbetler WHERE qovluq_id = ?").run(qovluq_id || "all");
 }
 
+// ---- Bilik Boşluqlarının İzlənməsi (Knowledge Gap Log) ----
+function bilikBosluguQeydEt({ sual, movzu = "", menbe = "Söhbət" }) {
+  const temizSual = String(sual || "").trim();
+  if (!temizSual || temizSual.length < 6) return null;
+
+  const indi = Date.now();
+  const yeniNorm = azNormallashdir(temizSual);
+  const aciqlar = db.prepare("SELECT * FROM bilik_bosluqlari WHERE status = 'aciq'").all();
+
+  // Oxşar sual artıq varsa sayını artır
+  for (const b of aciqlar) {
+    const movcudNorm = azNormallashdir(b.sual);
+    if (movcudNorm === yeniNorm || (yeniNorm.length > 15 && (movcudNorm.includes(yeniNorm) || yeniNorm.includes(movcudNorm)))) {
+      db.prepare("UPDATE bilik_bosluqlari SET say = say + 1, son_sorulma = ? WHERE id = ?").run(indi, b.id);
+      return { ...b, say: (b.say || 1) + 1, son_sorulma: indi };
+    }
+  }
+
+  const id = "gap-" + crypto.randomUUID().slice(0, 8);
+  const qisaMovzu = movzu || temizSual.slice(0, 70);
+  db.prepare(`
+    INSERT INTO bilik_bosluqlari (id, sual, movzu, menbe, say, status, yaradildi, son_sorulma)
+    VALUES (?, ?, ?, ?, 1, 'aciq', ?, ?)
+  `).run(id, temizSual, qisaMovzu, menbe, indi, indi);
+
+  return { id, sual: temizSual, movzu: qisaMovzu, menbe, say: 1, status: "aciq", yaradildi: indi, son_sorulma: indi };
+}
+
+function bilikBosluqlariniAl(limit = 20) {
+  return db.prepare(`
+    SELECT * FROM bilik_bosluqlari
+    WHERE status = 'aciq'
+    ORDER BY say DESC, son_sorulma DESC
+    LIMIT ?
+  `).all(limit);
+}
+
+function bilikBosluguHellEt(id) {
+  return db.prepare("UPDATE bilik_bosluqlari SET status = 'hell_edildi' WHERE id = ?").run(id);
+}
+
+function bilikBosluqlariniTemizle() {
+  return db.prepare("DELETE FROM bilik_bosluqlari").run();
+}
+
+// ---- Baza Yedəkləmə (Backup) və Vektor Statistikası ----
+function bazaBackupHazirla() {
+  try {
+    db.exec("PRAGMA wal_checkpoint(TRUNCATE);");
+  } catch (_) {}
+  const buffer = fs.readFileSync(DB_PATH);
+  const tarix = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 16);
+  return {
+    faylAdi: `beyinai_backup_${tarix}.sqlite`,
+    yol: DB_PATH,
+    olcu: buffer.length,
+    buffer
+  };
+}
+
+function vektorStatistikasiAl() {
+  const cemi = db.prepare("SELECT COUNT(*) as c FROM parcalar").get().c;
+  const vektorlu = db.prepare("SELECT COUNT(*) as c FROM parcalar WHERE vektor IS NOT NULL AND length(vektor) > 10").get().c;
+  const qaliq = Math.max(0, cemi - vektorlu);
+  const faiz = cemi > 0 ? Math.round((vektorlu / cemi) * 100) : 100;
+  return { cemi, vektorlu, qaliq, faiz };
+}
+
+function vektorsuzParcalariAl(limit = 1000) {
+  return db.prepare(`
+    SELECT id, basliq, gonderen, metn
+    FROM parcalar
+    WHERE vektor IS NULL OR length(vektor) <= 10
+    ORDER BY id ASC
+    LIMIT ?
+  `).all(limit);
+}
+
 function statistikaAl() {
   const qovluqSayi = db.prepare("SELECT COUNT(*) as c FROM qovluqlar").get().c;
   const menbeSayi = db.prepare("SELECT COUNT(*) as c FROM menbeler").get().c;
   const parcaSayi = db.prepare("SELECT COUNT(*) as c FROM parcalar").get().c;
   const yaddasSayi = db.prepare("SELECT COUNT(*) as c FROM yaddas").get().c;
-  return { qovluqSayi, menbeSayi, parcaSayi, yaddasSayi };
+  const bosluqSayi = db.prepare("SELECT COUNT(*) as c FROM bilik_bosluqlari WHERE status = 'aciq'").get().c;
+  const vektorluSay = db.prepare("SELECT COUNT(*) as c FROM parcalar WHERE vektor IS NOT NULL AND length(vektor) > 10").get().c;
+  return { qovluqSayi, menbeSayi, parcaSayi, yaddasSayi, bosluqSayi, vektorluSay };
 }
 
 module.exports = {
   db,
+  DB_PATH,
   azKicilt,
   azNormallashdir,
   azKokCixar,
@@ -1150,6 +1243,13 @@ module.exports = {
   yaddasRedakteEt,
   yaddasSil,
   praktikaKeysElaveEt,
+  bilikBosluguQeydEt,
+  bilikBosluqlariniAl,
+  bilikBosluguHellEt,
+  bilikBosluqlariniTemizle,
+  bazaBackupHazirla,
+  vektorStatistikasiAl,
+  vektorsuzParcalariAl,
   sohbetleriAl,
   sohbetElaveEt,
   sohbetleriTemizle,

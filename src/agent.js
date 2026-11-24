@@ -232,16 +232,17 @@ async function agentDerinAxtarisEt({
   tarix_baslangic = "",
   tarix_son = "",
   menbe_nov = "",
-  tenz
+  tenz,
+  oncedenVektor = null
 }) {
   const birleshmishParcalarMap = new Map();
   const gorulmusImzalar = new Set();
   const sorguUzreTapilanlar = [];
   const addimLoqlari = [];
 
-  // Əgər bazada semantik vektorlar varsa, əsas sualın vektorunu hesabla
-  let esasSorguVektoru = null;
-  if (db.bazadaVektorVarmi() && sorgular.length > 0 && typeof ai.vektorYarat === "function") {
+  // Əgər paralel olaraq vektor artıq hesablanıbsa birbaşa istifadə et (0ms əlavə gecikmə!)
+  let esasSorguVektoru = oncedenVektor || null;
+  if (!esasSorguVektoru && db.bazadaVektorVarmi() && sorgular.length > 0 && typeof ai.vektorYarat === "function") {
     try {
       esasSorguVektoru = await ai.vektorYarat(sorgular[0], tenz);
     } catch (_) {}
@@ -447,6 +448,126 @@ function cavabiMufettisIleDogrula(cavabMetni, sitatSiyahisi = [], qizilSiyahi = 
   return { tekst, duzelisSayi };
 }
 
+// ---- İKİ-MƏRHƏLƏLİ ÖZÜNÜ-YOXLAMA (Tənqidçi Müfəttiş / Critic Pass) ----
+// 1) Sitat verilən maddələrin bazadakı mənbələrdə olub-olmadığını deterministik yoxlayır (hallüsinasiya qalxanı)
+// 2) Mürəkkəb suallarda 2-ci LLM mərhələsi ilə gizli istisna, tarix kəsişməsi və cərimə risklərini yoxlayır
+async function criticPassIleYoxla({
+  sual,
+  ilkinCavab,
+  sitatlar = [],
+  uygunQizilQaydalar = [],
+  qanunVePraktikaVar = false,
+  tenz = {},
+  aktivDerinRejim = true,
+  yenidenArasdir = false
+}) {
+  const netice = {
+    status: "OK",
+    qeyd: "Maddə istinadları, istisnalar və risklər təsdiqləndi.",
+    elaveXeberdarliq: "",
+    tesdiqlenmemisMaddeler: []
+  };
+
+  if (!ilkinCavab || ilkinCavab.length < 40) return netice;
+
+  // 1) Deterministik Maddə Yoxlaması (0ms)
+  const bazaBirlesik =
+    sitatlar.map(s => `${s.basliq || ""} ${s.metn || ""}`).join(" ") +
+    " " +
+    uygunQizilQaydalar.map(q => q.metn || "").join(" ");
+
+  const cavabMaddeleri = new Set();
+  const re1 = /Maddə\s+(\d+(?:\.\d+)*(?:-\d+)?)/gi;
+  const re2 = /(\d+(?:\.\d+)+)\s*[-–]?\s*(?:ci|cı|cu|cü)\s+maddə/gi;
+  let m;
+  while ((m = re1.exec(ilkinCavab)) !== null) cavabMaddeleri.add(m[1]);
+  while ((m = re2.exec(ilkinCavab)) !== null) cavabMaddeleri.add(m[1]);
+
+  if (sitatlar.length > 0 && cavabMaddeleri.size > 0) {
+    for (const md of cavabMaddeleri) {
+      const esasNo = md.split(".")[0];
+      const tapildi = bazaBirlesik.includes(md) || new RegExp(`(?:Maddə\\s+${esasNo}|\\b${esasNo}\\.)`, "i").test(bazaBirlesik);
+      if (!tapildi) {
+        netice.tesdiqlenmemisMaddeler.push(md);
+      }
+    }
+  }
+
+  // 2) İkinci Mərhələ Tənqidçi Auditor (LLM Critic Pass) — yalnız mürəkkəb suallarda, ziddiyyətdə, təsdiqlənməmiş maddədə və ya yenidən araşdırmada işə düşür (sürəti ~2x artırır!)
+  const apiVar = Boolean(tenz.gemini_api_key || process.env.GEMINI_API_KEY || tenz.groq_api_key);
+  const murekkebSual = yenidenArasdir || qanunVePraktikaVar || netice.tesdiqlenmemisMaddeler.length > 0 || sual.length >= 48;
+  if (!aktivDerinRejim || !apiVar || !murekkebSual) {
+    if (netice.tesdiqlenmemisMaddeler.length > 0) {
+      netice.status = "XEBERDARLIQ";
+      netice.qeyd = `Bazada birbaşa mətni olmayan maddə istinadları qeyd edildi: Maddə ${netice.tesdiqlenmemisMaddeler.join(", ")}.`;
+    } else if (!murekkebSual) {
+      netice.qeyd = "Sürətli deterministik yoxlama keçildi (sadə sual — əlavə LLM gecikməsi olmadan).";
+    }
+    return netice;
+  }
+
+  const qisaMenbeler = sitatlar
+    .slice(0, 5)
+    .map(s => `[Mənbə ${s.nomre} | ${s.huquqi_etiket}]: ${(s.basliq || "")} — ${(s.metn || "").slice(0, 320)}`)
+    .join("\n");
+
+  const qisaQaydalar = uygunQizilQaydalar.map(q => `- ${q.metn}`).join("\n");
+
+  const criticSistem = `Sən 2-ci mərhələ Tənqidçi Müfəttiş (Critic Auditor) sistemisən.
+Sənə istifadəçinin sualı, bazadan tapılan rəsmi mənbələr və əsas AI-ın hazırladığı İLKİN CAVAB verilir.
+Sənin işin yalnız bu 3 kritik səhvi tutmaqdır:
+1. Hallüsinasiya / Maddə Uyğunsuzluğu: İlkin cavabda bazadakı mətnlə ziddiyyət təşkil edən səhv maddə və ya səhv rəqəm varmı?
+2. Unudulmuş İstisna / Tarix Kəsişməsi / Cərimə Riski: Sualda gizli bir istisna, son tarix şərti və ya maliyyə sanksiyası riski unudulubmu?
+3. Qanun vs Praktika Fərqi: Rəsmi qanunla praktiki təcrübə arasında fərq varsa, bu aydın vurğulanıbmı?
+
+Əgər ilkin cavab artıq dəqiq və tamdırsa, "status": "OK" qaytar. Yalnız REAL və VACİB bir səhv/boşluq tapdıqda "status": "DUZELIS" qaytar!
+
+YALNIZ JSON FORMATINDA CAVAB VER:
+{
+  "status": "OK",
+  "qeyd": "1 cümləlik auditor rəyi",
+  "elave_xeberdarliq": ""
+}`;
+
+  const criticPrompt = `SUAL: ${sual}
+
+TAPILMIŞ MƏNBƏLƏR:
+${qisaMenbeler || "Mənbə yoxdur."}
+
+QIZIL QAYDALAR:
+${qisaQaydalar || "Yoxdur."}
+
+${netice.tesdiqlenmemisMaddeler.length > 0 ? `BAZADA TAPILMAYAN MADDƏ İSTİNADLARI: ${netice.tesdiqlenmemisMaddeler.join(", ")}\n` : ""}${qanunVePraktikaVar ? "QEYD: Mənbələrdə HƏM rəsmi qanun, HƏM praktiki qrup təcrübəsi var.\n" : ""}
+İLKİN CAVAB:
+${ilkinCavab.slice(0, 2200)}`;
+
+  try {
+    const xam = await ai.llmCagir({
+      sistemPromptu: criticSistem,
+      istifadeciPromptu: criticPrompt,
+      tenz,
+      derinRejim: false
+    });
+    if (xam) {
+      const mJson = String(xam).match(/\{[\s\S]*\}/);
+      if (mJson) {
+        const parsed = JSON.parse(mJson[0]);
+        if (parsed.status === "DUZELIS" && parsed.elave_xeberdarliq && String(parsed.elave_xeberdarliq).trim().length > 10) {
+          netice.status = "DUZELIS";
+          netice.qeyd = String(parsed.qeyd || "Əlavə istisna/risk xəbərdarlığı əlavə edildi.").trim();
+          netice.elaveXeberdarliq = String(parsed.elave_xeberdarliq).trim();
+        } else if (parsed.qeyd) {
+          netice.qeyd = String(parsed.qeyd).trim();
+        }
+      }
+    }
+  } catch (_) {
+    // Critic Pass xəta verərsə əsas cavabı bloklamır
+  }
+
+  return netice;
+}
+
 // ---- AGENT ADDIM 3: Dərin Analitik Sintez (Gemini Deep Thinking + Parçaların Birləşdirilməsi) ----
 async function agentSualCavabla({
   sual,
@@ -455,19 +576,24 @@ async function agentSualCavabla({
   tarix_baslangic = "",
   tarix_son = "",
   menbe_nov = "",
-  derin_rejim = null
+  derin_rejim = null,
+  yenidenArasdir = false,
+  evvelkiCavab = ""
 }) {
   const baslangicVaxt = Date.now();
   const tenz = db.tenzimlemeleriAl();
-  const aktivDerinRejim = derin_rejim !== null ? Boolean(derin_rejim) : (tenz.derin_rejim !== "0");
+  const aktivDerinRejim = yenidenArasdir ? true : (derin_rejim !== null ? Boolean(derin_rejim) : (tenz.derin_rejim !== "0"));
   const dusunmeAddimlari = [];
+  if (yenidenArasdir) {
+    dusunmeAddimlari.push(`🔄 Yenidən Dərin Araşdırma Rejimi: İstifadəçi əvvəlki cavabı bəyənmədi, sual sıfırdan və fərqli bucaqdan təkrar araşdırılır.`);
+  }
 
   // 1) Birbaşa yaddaş əmri və ya İstifadəçi Ekspert Düzəlişi (Active Learning Loop) varmı?
   const tarixce = db.sohbetleriAl(qovluq_id, 6);
   const sonIstifadeciSuali = [...tarixce].reverse().find(m => m.rol === "user")?.metn || "";
 
   const yaddasEmri = sual.match(/^(?:yadda saxla ki|unutma ki|qeyd et ki|yadda saxla\s*[:-])\s*(.+)/i);
-  const duzelisEmri = !yaddasEmri && sual.length > 25 && /(?:düzgün təhlil etmədin|bəyənmədim|səhvdir|yanlışdır|əslində belədir|şərti belədi|qaydası belədir|qəbul edilir|belə hesablanmır|orada səhv)/i.test(sual);
+  const duzelisEmri = !yaddasEmri && sual.length > 25 && /(?:düzgün təhlil etmədin|bəyənmədim|səhvdir|yanlışdır|əslində belədir|şərti belədi|qaydası belədir|qəbul edilir|belə hesablanmır|orada səhv|düzgün deyil|elə deyil)/i.test(sual);
 
   if (yaddasEmri && yaddasEmri[1]) {
     const temizQayda = yaddasEmri[1].trim();
@@ -513,8 +639,16 @@ async function agentSualCavabla({
   const aktivMenbeler = db.menbeleriAl(qovluq_id).filter(m => m.aktiv === 1);
   dusunmeAddimlari.push(`🗂️ Aktiv Baza yoxlanıldı: **${aktivMenbeler.length}** mənbə (${aktivMenbeler.map(m => m.ad).slice(0, 5).join(", ") || "boşdur"}).`);
 
-  // 2) Agent Axtarış Planı qurur (Universal Sİ Sorğu Tərcüməçisi + Dialoq Konteksti + Maddə/Termin Planlayıcısı)
-  const plan = await agentAxtarisPlaniQur(sual, aktivMenbeler, tenz, sonIstifadeciSuali);
+  // 2) Paralel İcra (Promise.all): Axtarış Planı + Semantik Sual Vektoru eyni anda hesablanır (sürət 2x artır!)
+  const vektorPromise = (db.bazadaVektorVarmi() && typeof ai.vektorYarat === "function")
+    ? ai.vektorYarat(sual, tenz).catch(() => null)
+    : Promise.resolve(null);
+
+  const [plan, oncedenVektor] = await Promise.all([
+    agentAxtarisPlaniQur(sual, aktivMenbeler, tenz, sonIstifadeciSuali),
+    vektorPromise
+  ]);
+
   if (plan.dialoqKontekstiElaveEdildi) {
     dusunmeAddimlari.push(`💬 Dialoq Konteksti: Əvvəlki sualın mövzusu (*"${sonIstifadeciSuali.slice(0, 70)}..."*) cari davam sualı ilə birləşdirildi.`);
   }
@@ -529,7 +663,8 @@ async function agentSualCavabla({
     tarix_baslangic,
     tarix_son,
     menbe_nov,
-    tenz
+    tenz,
+    oncedenVektor
   });
   dusunmeAddimlari.push(...addimLoqlari);
 
@@ -610,7 +745,10 @@ async function agentSualCavabla({
   let ziddiyyetQeydi = "";
   const resmiBloklar = sitatlar.filter(s => s.huquqi_pille <= 2);
   const qeyriResmiBloklar = sitatlar.filter(s => s.huquqi_pille === 3);
-  if (resmiBloklar.length > 0 && qeyriResmiBloklar.length > 0) {
+  const qanunVePraktikaVar = resmiBloklar.length > 0 && qeyriResmiBloklar.length > 0;
+
+  if (qanunVePraktikaVar) {
+    dusunmeAddimlari.push(`⚖️ Qanun vs Praktika Müqayisəsi: Rəsmi məcəllə norması ilə canlı qrup təcrübələri çarpaz yoxlanılır.`);
     const resmiBirlesik = resmiBloklar.map(s => s.metn).join(" ") + " " + uygunQizilQaydalar.map(q => q.metn).join(" ");
     const qeyriResmiBirlesik = qeyriResmiBloklar.map(s => s.metn).join(" ");
     if (/işçi\s*sayı\s*tələbi\s*(?:yoxdur|olmadan)|3\s*işçi\s*saxlamadan/i.test(resmiBirlesik) && /3\s*işçi/i.test(qeyriResmiBirlesik)) {
@@ -622,6 +760,10 @@ async function agentSualCavabla({
       dusunmeAddimlari.push(`⚖️ Ziddiyyət Detektoru: Rəsmi Məcəllə / Qızıl Qayda ilə köhnə qeyd arasındakı fərq aşkarlandı və rəsmi norma üstün götürüldü.`);
     }
   }
+
+  const qanunPraktikaTelimati = qanunVePraktikaVar
+    ? `\n\n7. **⚖️ QANUN VS PRAKTİKA ZİDDİYYƏT AŞKARLAYICISI (MÜTLƏQ İCRA ET!):**\n   Bazada HƏM rəsmi qanun maddəsi, HƏM DƏ mühasib qruplarından gələn canlı praktiki təcrübə tapılıb. Onları çarpaz müqayisə et! Əgər qanunun hərfi mətni ilə praktikada müfəttişlərin / portalın davranışı arasında fərq və ya risk varsa, cavabında mütləq bu 3 bəndi açıq göstər:\n   - **⚖️ Qanun nə deyir:** [rəsmi maddə]\n   - **💼 Praktikada nə baş verir:** [qruplardan / portaldan real yanaşma]\n   - **🎯 Ən təhlükəsiz qərar:** [risksiz, cəriməsiz çıxış yolu]`
+    : "";
 
   const yaddasKonteksti = sexsiYaddas.length > 0
     ? sexsiYaddas.map(y => `- [${y.kateqoriya.toUpperCase()}] ${y.metn}`).join("\n")
@@ -661,6 +803,8 @@ SƏNİN ROLUN VƏ DƏRİN ANALİTİK METODOLOGİYAN:
    - "Əgər X halıdırsa → A qaydası; Əgər Y halıdırsa → B istisnası" şəklində şərtləri, fərqli tarixləri, dövriyyə/işçi hədlərini və canlı praktiki keysləri (e-taxes, btp nüanslarını) göstər.
    #### 🚨 3. Maliyyə Sanksiyası, Cərimə və Risklər:
    - Qaydaya əməl edilmədikdə tətbiq olunan maliyyə sanksiyasını, cərimə faizlərini və vergi yoxlaması risklərini dəqiq maddə ilə göstər.
+   #### 💡 4. Proaktiv Ekspert Təklifi və Strateji Addım:
+   - İstifadəçinin soruşmadığı, lakin biznes və vergi baxımından kritik olan gizli fürsət, optimizasiya və ya təhlükəsizlik addımını təklif et (məsələn: "Bunu filan maddə ilə sənədləşdirsəniz vergidən azad olar", "Əmək müqaviləsinə filan bəndi əlavə edin ki, cərimə riski sıfırlansın").
    </DETALLI_ANALIZ>
 
    HİSSƏ 3 (Mövzunu dərinləşdirən 2-3 ağıllı növbəti sual — <NOVBETI_SUALLAR> teqləri daxilində):
@@ -673,10 +817,14 @@ SƏNİN ROLUN VƏ DƏRİN ANALİTİK METODOLOGİYAN:
    - Fakt TAPILMIŞ SİTAT BLOKLARI içində varsa, mütləq həmin blokun nömrəsini [1], [2] kimi göstər.
    - Fakt sitat bloklarında yoxdursa və öz ümumi hüquqi/ekspert biliyinlə tamamlayırsansa, uydurma sitat nömrəsi qoyma və bunu açıq qeyd et.
 6. **Avtomatik Şəxsi Yaddaş:** YALNIZ istifadəçinin özünə, şirkətinə, müştərisinə və ya xüsusi iş qaydasına aid fərdi fakt olduqda (adi ümumi qanun maddələrini bura təkrar yazma!) ən sonda əlavə et:
-<YADDAŞ kateqoriya="fakt|qayda|tapşırıq|şəxs">Qısa fərdi fakt</YADDAŞ>
+<YADDAŞ kateqoriya="fakt|qayda|tapşırıq|şəxs">Qısa fərdi fakt</YADDAŞ>${qanunPraktikaTelimati}
 
 UZUNMÜDDƏTLİ ŞƏXSİ YADDAŞ (QIZIL QAYDALAR — BİRİNCİ DƏRƏCƏLİ ÜSTÜNLÜK!):
 ${yaddasKonteksti}`;
+
+  const yenidenBloku = yenidenArasdir
+    ? `\n\n⚠️ YENİDƏN DƏRİN ARAŞDIRMA TAPŞIRIĞI:\nİstifadəçi əvvəlki cavabı bəyənmədi və yenidən araşdırmağını istədi!\n${evvelkiCavab ? `ƏVVƏLKİ BƏYƏNİLMƏYƏN CAVAB (bunu təkrarlama, daha dərin və dəqiq araşdır):\n${String(evvelkiCavab).replace(/<[^>]+>/g, "").slice(0, 700)}\n` : ""}Zəhmət olmasa sualı sıfırdan oxu, qaçırdığın detalları, istisnaları, tarixləri və rəsmi maddələri yenidən yoxla və tam fərqli, daha yetkin ekspert cavabı ver!`
+    : "";
 
   const istifadeciPromptu = `BAZADAKI AKTİV SƏNƏDLƏRİN PASPORTU:
 ${pasportXulasesi || "Hələ sənəd yüklənməyib."}
@@ -685,7 +833,7 @@ TAPILMIŞ SİTAT BLOKLARI:
 ${menbeKonteksti}
 
 İSTİFADƏÇİNİN SUALI / TAPŞIRIĞI:
-${sual}`;
+${sual}${yenidenBloku}`;
 
   let xamCavab = await ai.llmCagir({
     sistemPromptu,
@@ -723,6 +871,29 @@ ${sual}`;
     `🕵️ Daxili Müfəttiş Yoxlaması: Mənbə üstünlük iyerarxiyası, sitat nömrələri və Qızıl Qayda uyğunluğu doğrulandı.`
   );
 
+  // İki-Mərhələli Özünü-Yoxlama (Tənqidçi Müfəttiş / Critic Pass)
+  const criticPass = await criticPassIleYoxla({
+    sual,
+    ilkinCavab: xamCavab,
+    sitatlar,
+    uygunQizilQaydalar,
+    qanunVePraktikaVar,
+    tenz,
+    aktivDerinRejim,
+    yenidenArasdir
+  });
+  if (criticPass.status === "DUZELIS" && criticPass.elaveXeberdarliq) {
+    const criticBlok = `\n\n🕵️ **Tənqidçi Müfəttiş Qeydi:** ${criticPass.elaveXeberdarliq}`;
+    if (/<DETALLI_ANALIZ>/i.test(xamCavab)) {
+      xamCavab = xamCavab.replace(/<DETALLI_ANALIZ>/i, `${criticBlok}\n\n<DETALLI_ANALIZ>`);
+    } else {
+      xamCavab += criticBlok;
+    }
+    dusunmeAddimlari.push(`🔎 2-ci Mərhələ Tənqidçi Müfəttiş (Düzəliş): *${criticPass.qeyd}*`);
+  } else {
+    dusunmeAddimlari.push(`🔎 2-ci Mərhələ Tənqidçi Müfəttiş (${criticPass.status}): *${criticPass.qeyd}*`);
+  }
+
   // Bilik Boşluğu (Knowledge Gap) və Etibarlılıq Dərəcəsini müəyyən et
   const enYuksekXamBal = sitatlar[0]?.xam_bal || 0;
   const sualKokleri = db.sozKokleri(sual).filter(k => k.normKok.length >= 3);
@@ -743,14 +914,27 @@ ${sual}`;
     !bilikBoslugu &&
     sitatlar.some(s => (s.huquqi_pille <= 2 && (s.xam_bal || 0) >= 35) || /^Maddə\s+\d+/i.test(s.basliq || ""));
 
-  const etibarliliq = (resmiMaddeTapildi || uygunQizilQaydalar.length > 0)
-    ? "🟢 Yüksək Dəqiqlik (Rəsmi Maddə + Qızıl Qayda Təsdiqli)"
+  const etibarliliqKod = (resmiMaddeTapildi || uygunQizilQaydalar.length > 0)
+    ? "yuksek"
     : !bilikBoslugu
-      ? "🟡 Orta Dəqiqlik (Mənbə + Analitik Sintez)"
-      : "🔴 Bilik Boşluğu (Bazada bu mövzuya aid rəsmi sənəd tapılmadı)";
+      ? "orta"
+      : "bosluq";
+
+  const etibarliliq = etibarliliqKod === "yuksek"
+    ? "🟢 Rəsmi Maddə Təsdiqli"
+    : etibarliliqKod === "orta"
+      ? "🟡 Analitik Sintez"
+      : "🔴 Bazada Rəsmi Mənbə Yoxdur";
 
   if (bilikBoslugu) {
-    dusunmeAddimlari.push(`📌 Bilik Boşluğu Qeydə Alındı: Bazada bu mövzu üzrə rəsmi mənbə zəifdir — "🎯 Düzəliş Öyrət" düyməsi ilə dəqiq qaydanı 1 kliklə sistemə öyrədə bilərsiniz.`);
+    if (typeof db.bilikBosluguQeydEt === "function") {
+      db.bilikBosluguQeydEt({
+        sual,
+        movzu: sual.slice(0, 70),
+        menbe: qovluq_id === "all" ? "Mərkəzi Beyin" : qovluq_id
+      });
+    }
+    dusunmeAddimlari.push(`📌 Bilik Boşluğu Qeydə Alındı: Bazada bu mövzu üzrə rəsmi mənbə zəifdir — /bosluqlar siyahısına əlavə edildi.`);
   }
 
   const muddetSan = ((Date.now() - baslangicVaxt) / 1000).toFixed(1);
@@ -774,6 +958,14 @@ ${sual}`;
     .replace(/(?:---\s*)?\*\*Yadda saxlanılmalı[^*]*\*\*[\s\S]*$/i, "")
     .trim();
 
+  // Yeni yaddaş əlavə olundusa, arxa planda yaddaşın özünü-təmizləməsini yoxla
+  if (yeniYaddaslar.length > 0 || yaddasEmri || duzelisEmri) {
+    try {
+      const consolidator = require("./memory-consolidator");
+      consolidator.avtoKonsolidasiyaYoxla();
+    } catch (_) {}
+  }
+
   db.sohbetElaveEt({ qovluq_id, rol: "user", metn: sual, sitatlar: [] });
   const saxlanilanCavab = db.sohbetElaveEt({
     qovluq_id,
@@ -789,6 +981,10 @@ ${sual}`;
     dusunmeAddimlari,
     yeniYaddaslar,
     bilikBoslugu,
+    etibarliliq,
+    etibarliliqKod,
+    qanunVePraktikaVar,
+    criticPass,
     notebooklmFaylSayi: geminiFileParts.length
   };
 }
@@ -796,6 +992,7 @@ ${sual}`;
 module.exports = {
   agentSualCavabla,
   cavabiMufettisIleDogrula,
+  criticPassIleYoxla,
   menbeHuquqiDerecesi,
   nlmKorpuDurumuYenile,
   nlmKorpuVeziyyeti,

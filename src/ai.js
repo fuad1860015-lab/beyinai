@@ -57,38 +57,57 @@ async function vektorYarat(metn, tenz = null) {
       }
     }
 
-    if (t.gemini_api_key) {
-      const key = t.gemini_api_key.trim();
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${encodeURIComponent(key)}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "models/gemini-embedding-001",
-            content: { parts: [{ text: temiz }] }
-          }),
-          signal: AbortSignal.timeout(6000)
-        }
-      );
-      if (res.ok) {
-        const data = await res.json();
-        if (data.embedding && Array.isArray(data.embedding.values)) {
-          return data.embedding.values;
-        }
+    if (t.gemini_api_key || process.env.GEMINI_API_KEY) {
+      const key = (t.gemini_api_key || process.env.GEMINI_API_KEY || "").trim();
+      const embedModeller = ["gemini-embedding-001", "text-embedding-004"];
+      for (const em of embedModeller) {
+        try {
+          const res = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${em}:embedContent?key=${encodeURIComponent(key)}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                model: `models/${em}`,
+                content: { parts: [{ text: temiz }] }
+              }),
+              signal: AbortSignal.timeout(8000)
+            }
+          );
+          if (res.ok) {
+            const data = await res.json();
+            if (data.embedding && Array.isArray(data.embedding.values) && data.embedding.values.length > 0) {
+              return data.embedding.values;
+            }
+          }
+        } catch (_) {}
       }
     }
   } catch (_) {}
   return null;
 }
 
+let vektorIsiVeziyyet = {
+  gedir: false,
+  cemi: 0,
+  hazir: 0,
+  ugurlu: 0,
+  xeta: 0,
+  sonBitme: null,
+  sonXeta: ""
+};
+
+function vektorIsiVeziyyetiAl() {
+  return { ...vektorIsiVeziyyet, baza: db.vektorStatistikasiAl() };
+}
+
 async function menbeVektorlashdir(menbeDetali) {
   if (!menbeDetali) return;
   const t = db.tenzimlemeleriAl();
-  const key = (t.gemini_api_key || "").trim();
-  const gecerliGeminiKey = key.startsWith("AIza");
+  const key = (t.gemini_api_key || process.env.GEMINI_API_KEY || "").trim();
+  const gecerliGeminiKey = key.length >= 20;
 
-  if (gecerliGeminiKey) {
+  if (gecerliGeminiKey && key.startsWith("AIza")) {
     try {
       await geminiFiles.menbeniGeminiIleSinxronEt(menbeDetali, key);
     } catch (_) {}
@@ -105,10 +124,101 @@ async function menbeVektorlashdir(menbeDetali) {
     if (v) {
       db.parcaVektorYenile(p.id, v);
     } else {
-      // İlk sorğu uğursuz oldusa (məs: limit və ya açar xətası), qalanlarını boş yerə gözlətmə
       break;
     }
   }
+}
+
+/**
+ * Bazadakı bütün vektorsuz parçaları təhlükəsiz partiyalarla (batch) semantik vektorlaşdırır
+ */
+async function butunBazaniVektorlashdir({ batchOlcu = 5, gecikmeMs = 250, onProgress = null } = {}) {
+  if (vektorIsiVeziyyet.gedir) {
+    return { ok: false, gedir: true, mesaj: "Vektorlaşdırma prosesi artıq arxa planda gedir.", veziyyet: vektorIsiVeziyyetiAl() };
+  }
+
+  const t = db.tenzimlemeleriAl();
+  const key = (t.gemini_api_key || process.env.GEMINI_API_KEY || "").trim();
+  if (key.length < 20 && t.ai_provayder !== "ollama") {
+    return { ok: false, mesaj: "Semantik vektorlaşdırma üçün Gemini API açarı və ya Ollama lazımdır.", veziyyet: vektorIsiVeziyyetiAl() };
+  }
+
+  const siyahi = db.vektorsuzParcalariAl(2000);
+  if (siyahi.length === 0) {
+    return { ok: true, ugurlu: 0, xeta: 0, cemi: 0, mesaj: "✅ Bazadakı bütün parçalar artıq 100% semantik vektorlaşdırılıb!", veziyyet: vektorIsiVeziyyetiAl() };
+  }
+
+  vektorIsiVeziyyet = {
+    gedir: true,
+    cemi: siyahi.length,
+    hazir: 0,
+    ugurlu: 0,
+    xeta: 0,
+    sonBitme: null,
+    sonXeta: ""
+  };
+
+  let ardicilXeta = 0;
+
+  try {
+    for (let i = 0; i < siyahi.length; i += batchOlcu) {
+      const partiya = siyahi.slice(i, i + batchOlcu);
+      const neticeler = await Promise.all(
+        partiya.map(async p => {
+          const metn = `${p.basliq ? p.basliq + "\n" : ""}${p.gonderen ? "Göndərən: " + p.gonderen + "\n" : ""}${p.metn}`;
+          const v = await vektorYarat(metn, t);
+          if (v) {
+            db.parcaVektorYenile(p.id, v);
+            return true;
+          }
+          return false;
+        })
+      );
+
+      for (const ugur of neticeler) {
+        vektorIsiVeziyyet.hazir++;
+        if (ugur) {
+          vektorIsiVeziyyet.ugurlu++;
+          ardicilXeta = 0;
+        } else {
+          vektorIsiVeziyyet.xeta++;
+          ardicilXeta++;
+        }
+      }
+
+      if (typeof onProgress === "function" && (vektorIsiVeziyyet.hazir % 50 === 0 || vektorIsiVeziyyet.hazir === siyahi.length)) {
+        try { await onProgress(vektorIsiVeziyyetiAl()); } catch (_) {}
+      }
+
+      if (ardicilXeta >= 8) {
+        vektorIsiVeziyyet.sonXeta = "API sorğu limiti və ya şəbəkə xətası səbəbilə proses dayandırıldı.";
+        break;
+      }
+
+      if (i + batchOlcu < siyahi.length && gecikmeMs > 0) {
+        await new Promise(r => setTimeout(r, gecikmeMs));
+      }
+    }
+  } finally {
+    vektorIsiVeziyyet.gedir = false;
+    vektorIsiVeziyyet.sonBitme = Date.now();
+  }
+
+  const stat = db.vektorStatistikasiAl();
+  return {
+    ok: vektorIsiVeziyyet.ugurlu > 0 || stat.qaliq === 0,
+    ugurlu: vektorIsiVeziyyet.ugurlu,
+    xeta: vektorIsiVeziyyet.xeta,
+    cemi: siyahi.length,
+    sonXeta: vektorIsiVeziyyet.sonXeta,
+    veziyyet: vektorIsiVeziyyetiAl(),
+    mesaj:
+      `🧠 <b>Semantik Vektor İndeksləməsi Tamamlandı!</b>\n` +
+      `• ✅ Yeni vektorlaşdırılan: <b>${vektorIsiVeziyyet.ugurlu}</b> parça\n` +
+      `• ⚠️ Xəta/Dayanma: <b>${vektorIsiVeziyyet.xeta}</b>\n` +
+      `• 📊 Ümumi baza əhatəsi: <b>${stat.vektorlu} / ${stat.cemi} (${stat.faiz}%)</b>` +
+      (vektorIsiVeziyyet.sonXeta ? `\n• ℹ️ Qeyd: <i>${vektorIsiVeziyyet.sonXeta}</i>` : "")
+  };
 }
 
 // ---- 2. Multimodal Analiz: Səsli Mesajlar (Voice) və Şəkillər / Skan PDF (Vision OCR) ----
@@ -716,6 +826,8 @@ Yalnız 3 fərqli axtarış sətri yaz (hər sətirdə açar sözlər və maddə
 module.exports = {
   vektorYarat,
   menbeVektorlashdir,
+  butunBazaniVektorlashdir,
+  vektorIsiVeziyyetiAl,
   mediaAnalizEt,
   llmCagir,
   universalSorguPlanla,
