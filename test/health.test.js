@@ -123,6 +123,57 @@ async function test(ad, fn) {
     assert.equal(calc.kalkulyatorSorgusudurmu("hesabla məzuniyyət 1200 maaş 21 gün"), true);
   });
 
+  await test("12. CSV Cədvəl Oxuyucusu (Ayırıcı, dırnaqlı xana, sütun-dəyər bağlanması)", async () => {
+    const parsers = require("../src/parsers");
+    const csvBuf = Buffer.from('\uFEFF"Ad, Soyad";VÖEN;Məbləğ\n"Əliyev, Vəli";1234567890;1500 AZN\n"Həsənov, Rauf";2098765432;2400 AZN', "utf8");
+    const res = await parsers.faylEmalEt({ buffer: csvBuf, faylAdi: "vergi_cedveli.csv", mimeType: "text/csv" });
+    assert.strictEqual(res.nov, "csv", "CSV faylı 'csv' növü ilə tanınmalıdır");
+    assert.strictEqual(res.meta.setir_sayi, 2, "2 məlumat sətri olmalıdır");
+    assert.strictEqual(res.meta.sutun_sayi, 3, "3 sütun olmalıdır");
+    assert.strictEqual(res.meta.ayirici, ";", "Nöqtəli-vergül ayırıcısı avtomatik tanınmalıdır");
+    assert.ok(res.xam_metn.includes("VÖEN: 1234567890"), "Sütun adı dəyərlə bağlanmalıdır");
+    assert.ok(res.xam_metn.includes("Əliyev, Vəli"), "Dırnaq içindəki vergül pozulmamalıdır");
+  });
+
+  await test("13. Mənbə Versiyalaşdırılması, Tranzaksiya, Audit Jurnalı və Etibar Səviyyəsi", () => {
+    const ad = "__test_versiya_senedi.txt";
+    const m1 = db.menbeElaveEt({
+      qovluq_id: "qovluq-sexsi",
+      ad,
+      nov: "txt",
+      olcu: 120,
+      xulase: "Versiya 1",
+      xam_metn: "Birinci versiya mətn bloku 1234567890 vergi qanunu sınaq mətni.",
+      parcalar: [{ basliq: "V1", metn: "Birinci versiya mətn bloku." }]
+    });
+    assert.strictEqual(m1.etibar_seviyyesi, "orijinal_menbe");
+
+    const m2 = db.menbeYenile({
+      id: m1.id,
+      ad,
+      nov: "txt",
+      olcu: 140,
+      xulase: "Versiya 2",
+      xam_metn: "İkinci yenilənmiş versiya mətn bloku 9876543210 vergi qanunu sınaq mətni.",
+      parcalar: [{ basliq: "V2", metn: "İkinci versiya mətn bloku." }]
+    });
+    const versiyalar = db.menbeVersiyalariniAl(m2.id);
+    assert.ok(versiyalar.length >= 1, "Əvvəlki versiya menbe_versiyalari cədvəlində saxlanılmalıdır");
+
+    const audit = db.auditJurnaliniAl(5);
+    assert.ok(audit.length > 0, "Audit jurnalında əməliyyat qeydə alınmalıdır");
+
+    // Test qalıqlarını təmizlə
+    db.menbeSil(m2.id);
+    db.db.prepare("DELETE FROM menbe_versiyalari WHERE menbe_id = ?").run(m2.id);
+  });
+
+  await test("14. Baza Backup Bərpa Validasiyası (Etibarsız faylı rədd edir)", () => {
+    assert.throws(() => {
+      db.bazaBackupBerpaEt(Buffer.from("bu sqlite fayli deyil"));
+    }, /Etibarsız|SQLite3/);
+  });
+
   console.log(`\n======================================================`);
   console.log(`📊 TEST NƏTİCƏSİ: ${kecen} keçdi, ${ugursuz} uğursuz`);
   console.log(`======================================================\n`);
