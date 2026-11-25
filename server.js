@@ -78,15 +78,16 @@ function jsonCavab(res, status, data) {
   res.end(govde);
 }
 
-function govdeOxu(req, maksBayt = 200 * 1024 * 1024) {
+function govdeOxu(req, maksBayt = 50 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     const hisseler = [];
     let cemi = 0;
+    const maksMb = Math.round(maksBayt / (1024 * 1024));
     req.on("data", chunk => {
       cemi += chunk.length;
       if (cemi > maksBayt) {
         req.destroy();
-        reject(new Error("Fayl ölçüsü həddindən artıq böyükdür (Maksimum 80 MB)."));
+        reject(new Error(`Fayl ölçüsü həddindən artıq böyükdür (Maksimum ${maksMb} MB).`));
         return;
       }
       hisseler.push(chunk);
@@ -740,7 +741,7 @@ const server = http.createServer(async (req, res) => {
       return jsonCavab(res, 200, { ...netice, yaddas: db.yaddaslariAl() });
     }
 
-    // 16. 1-Kliklə Baza Ehtiyat Nüsxəsi (SQLite Backup) API
+    // 16. 1-Kliklə Baza Ehtiyat Nüsxəsi (SQLite Backup) və Bərpa (Restore) API
     if (yol === "/api/backup" && req.method === "GET") {
       const bkp = db.bazaBackupHazirla();
       res.writeHead(200, {
@@ -751,6 +752,30 @@ const server = http.createServer(async (req, res) => {
       });
       res.end(bkp.buffer);
       return;
+    }
+
+    if (yol === "/api/backup/berpa" && req.method === "POST") {
+      const b = await govdeOxu(req, 50 * 1024 * 1024);
+      if (!b.base64Data) {
+        return jsonCavab(res, 400, { ok: false, xeta: "Backup faylı (base64Data) göndərilməyib." });
+      }
+      const buf = Buffer.from(b.base64Data, "base64");
+      const net = db.bazaBackupBerpaEt(buf);
+      return jsonCavab(res, 200, {
+        ...net,
+        mesaj: `Baza uğurla bərpa edildi! (${net.menbeSayi} mənbə, ${net.parcaSayi} parça, ${net.yaddasSayi} yaddaş)`
+      });
+    }
+
+    // 16b. Mənbə Versiyaları və Audit Jurnalı API
+    if (yol.startsWith("/api/menbeler/") && yol.endsWith("/versiyalar") && req.method === "GET") {
+      const hisseler = yol.split("/");
+      const id = decodeURIComponent(hisseler[3] || "");
+      return jsonCavab(res, 200, { ok: true, versiyalar: db.menbeVersiyalariniAl(id) });
+    }
+
+    if (yol === "/api/audit" && req.method === "GET") {
+      return jsonCavab(res, 200, { ok: true, jurnal: db.auditJurnaliniAl(50) });
     }
 
     // 17. Tam Semantik Vektor İndeksləməsi API
