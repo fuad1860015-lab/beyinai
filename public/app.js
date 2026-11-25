@@ -49,7 +49,7 @@ function htmlQoru(s) {
     .replace(/"/g, "&quot;");
 }
 
-async function apiSorgu(yol, metod = "GET", govde = null, { signal = null, timeoutMs = 50000 } = {}) {
+async function apiSorgu(yol, metod = "GET", govde = null, { signal = null, timeoutMs = 120000 } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error("Sorğu vaxtı aşdı (Timeout).")), timeoutMs);
 
