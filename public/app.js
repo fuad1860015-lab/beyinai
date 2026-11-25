@@ -119,16 +119,28 @@ function ustPanelDurumYenile() {
     btnDerin.textContent = derinAktiv ? "🧠 Dərin Təhlil" : "⚡ Sürətli Rejim";
   }
 
+  const statusDot = document.querySelector("#btnTenzimlemeler .status-dot");
+  let statusReng = "#ef4444"; // Qırmızı: açar yoxdur/səhvdir
+
   if (t.ai_provayder === "ollama") {
     etiket.textContent = `Ollama (${t.ollama_model || "Lokal"})`;
-  } else if (t.ai_provayder === "groq" && t.groq_api_key) {
+    statusReng = "#10b981";
+  } else if (t.ai_provayder === "groq" && t.groq_api_key && t.groq_api_key.trim().length >= 15) {
     etiket.textContent = "Groq AI ✓";
+    statusReng = "#10b981";
   } else if (t.gemini_api_key && t.gemini_api_key.trim().length >= 20) {
     etiket.textContent = derinAktiv ? "Gemini 3 • Dərin Zəka ✓" : "Gemini 3 • Sürətli ✓";
+    statusReng = "#10b981";
   } else if (t.gemini_api_key && t.gemini_api_key.trim().length > 0) {
     etiket.textContent = "Gemini • Açar Yanlışdır ⚠️";
+    statusReng = "#f59e0b";
   } else {
-    etiket.textContent = "Gemini 3 Flash";
+    etiket.textContent = "AI Açarı Tələb Olunur ⚠️";
+    statusReng = "#ef4444";
+  }
+
+  if (statusDot) {
+    statusDot.style.background = statusReng;
   }
 
   const tgAktiv = veziyyet.baglantilar?.telegram?.aktiv;
@@ -494,13 +506,13 @@ function sohbetleriCiz() {
   if (veziyyet.sohbetler.length === 0) {
     qutu.innerHTML = `
       <div class="mesaj-qutu assistant" style="max-width: 100%;">
-        <div class="mesaj-basliq"><span>🧠 BeyinAI Asistant (v2.0)</span></div>
+        <div class="mesaj-basliq"><span>🧠 BeyinAI Asistant</span></div>
         <div class="mesaj-icerik">
-          <p><strong>Xoş gəldiniz!</strong> Sənədlərinizi və çatlarınızı sürətli analiz etməyə hazıram.</p>
+          <p><strong>Xoş gəldiniz!</strong> Vergi, hüquq, mühasibatlıq və şəxsi sənədlərinizi analiz etməyə hazıram.</p>
           <ul>
-            <li>Sol paneldən <strong>PDF, Word, Excel, WhatsApp (.txt/.zip), Telegram (.json), Səsli mesaj (.ogg/.mp3), Şəkil</strong> və ya <strong>Veb/YouTube linki</strong> əlavə edin.</li>
-            <li>Hər yüklənən sənəd üçün sağ paneldə avtomatik <strong>📊 Sənəd Pasportu</strong> (məbləğlər, tarixlər, VÖEN-lər, tapşırıqlar) və <strong>🔍 Sənəd İçi Axtarış</strong> yaradılır.</li>
-            <li>Yuxarıdakı <strong>📋 Tam Xülasə</strong>, <strong>✅ Sözlər və Tapşırıqlar</strong>, <strong>💰 Rəqəmlər və Maliyyə</strong>, <strong>👥 Şəxslər üzrə Analiz</strong> və <strong>⏳ Xronoloji Xəritə</strong> düymələri ilə 1 kliklə struktur hesabat çıxarın.</li>
+            <li>Aşağıdakı <strong>📎</strong> düyməsi və ya sol paneldən <strong>PDF, Word, Excel, CSV, WhatsApp/Telegram çatları, Səs və Şəkil</strong> əlavə edə bilərsiniz.</li>
+            <li>Sualınızı yazın və ya <strong>🎙️</strong> mikrofonla səsləndirin — cavablar rəsmi maddə istinadları, qərar matrisi və etibarlılıq göstəricisi ilə təqdim olunur.</li>
+            <li>Cavabların altındakı <strong>👍 / 🎯</strong> düymələri ilə sistemə yeni qaydalar öyrədə, <strong>📑 Sitatlar</strong> panelindən mənbələrin orijinal mətninə baxa bilərsiniz.</li>
           </ul>
         </div>
       </div>
@@ -692,7 +704,14 @@ function sohbetleriCiz() {
       }
       const temiz = teqleriTemizle(m.metn).replace(/[#*>_`[\]]/g, " ");
       const ut = new SpeechSynthesisUtterance(temiz);
-      ut.lang = "tr-TR";
+      const sesler = window.speechSynthesis.getVoices ? window.speechSynthesis.getVoices() : [];
+      const azSes = sesler.find(v => /^az/i.test(v.lang));
+      if (azSes) {
+        ut.voice = azSes;
+        ut.lang = azSes.lang;
+      } else {
+        ut.lang = "az-AZ";
+      }
       window.speechSynthesis.speak(ut);
       bildirisGoster("🔊 Cavab səsləndirilir... (Dayandırmaq üçün yenidən basın)");
     });
@@ -1645,7 +1664,7 @@ document.addEventListener("DOMContentLoaded", () => {
       solPanel.classList.toggle("bagli");
       localStorage.setItem("beyin_sol_bagli", solPanel.classList.contains("bagli") ? "1" : "0");
     });
-    if (localStorage.getItem("beyin_sol_bagli") === "1") {
+    if (localStorage.getItem("beyin_sol_bagli") === "1" || (localStorage.getItem("beyin_sol_bagli") === null && window.innerWidth <= 900)) {
       solPanel.classList.add("bagli");
     }
   }

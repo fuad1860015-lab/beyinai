@@ -1169,3 +1169,85 @@ body {
   gap: 3px;
   font-size: 11.5px;
 }
+
+/* Mobil və Planşet Uyğunlaşması (Responsive Media Queries) */
+@media (max-width: 900px) {
+  .aktiv-qovluq-badge {
+    display: none;
+  }
+
+  .sol-panel {
+    position: fixed;
+    top: 48px;
+    bottom: 0;
+    left: 0;
+    z-index: 40;
+    width: 270px;
+    box-shadow: 12px 0 32px rgba(0, 0, 0, 0.55);
+  }
+
+  .sol-panel.bagli {
+    margin-left: -280px !important;
+  }
+
+  .sag-panel {
+    position: fixed;
+    top: 48px;
+    bottom: 0;
+    right: 0;
+    width: 100% !important;
+    max-width: 380px;
+    z-index: 45;
+    box-shadow: -12px 0 32px rgba(0, 0, 0, 0.55);
+  }
+
+  .sohbet-axini {
+    padding: 14px 12px;
+    gap: 14px;
+  }
+
+  .sual-qabi {
+    padding: 8px 10px 12px 10px;
+  }
+}
+
+@media (max-width: 560px) {
+  .ust-panel {
+    padding: 0 8px;
+  }
+
+  .brend-ad {
+    font-size: 14px;
+  }
+
+  .derin-rejim-btn {
+    padding: 3px 7px;
+    font-size: 10.5px;
+  }
+
+  .ai-status-badge {
+    padding: 3px 7px;
+    font-size: 10.5px;
+    max-width: 135px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .sitat-toggle-btn {
+    padding: 3px 7px;
+    font-size: 10.5px;
+  }
+
+  .mesaj-qutu.user .mesaj-icerik {
+    max-width: 94%;
+  }
+
+  .mesaj-icerik {
+    padding: 11px 13px;
+    font-size: 13px;
+  }
+
+  .sag-panel {
+    max-width: 100%;
+  }
+}
