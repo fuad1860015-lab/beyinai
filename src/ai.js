@@ -225,7 +225,7 @@ async function butunBazaniVektorlashdir({ batchOlcu = 5, gecikmeMs = 250, onProg
 }
 
 // ---- 2. Multimodal Analiz: Səsli Mesajlar (Voice) və Şəkillər / Skan PDF (Vision OCR) ----
-async function mediaAnalizEt({ buffer, mimeType, faylAdi = "media" }) {
+async function mediaAnalizEt({ buffer, mimeType = "", faylAdi = "media", xususiPrompt = "" }) {
   const t = db.tenzimlemeleriAl();
   const isAudio = mimeType.startsWith("audio/") || /\.(ogg|opus|mp3|wav|m4a)$/i.test(faylAdi);
   const isImage = mimeType.startsWith("image/") || /\.(png|jpe?g|webp|bmp)$/i.test(faylAdi);
@@ -273,6 +273,7 @@ async function mediaAnalizEt({ buffer, mimeType, faylAdi = "media" }) {
           "Bu şəkli (skrinşot, sənəd, qaimə, çek və ya çat şəkli) detallı analiz et. Şəkildəki BÜTÜN yazıları, rəqəmləri, tarixləri, məbləğləri və cədvəlləri olduğu kimi oxuyub çıxar (OCR).";
       } else if (isPdf) {
         prompt =
+          xususiPrompt ||
           "Bu PDF sənədinin əsas məzmununu, bölmələrini, vacib maddələrini, rəqəmlərini və tarixlərini strukturlaşdırılmış mətn kimi çıxar.";
       }
 

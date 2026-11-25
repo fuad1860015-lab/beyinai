@@ -100,7 +100,90 @@ db.exec(`
     son_sorulma INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_bosluq_status ON bilik_bosluqlari(status);
+
+  CREATE TABLE IF NOT EXISTS menbe_versiyalari (
+    id TEXT PRIMARY KEY,
+    menbe_id TEXT NOT NULL,
+    versiya_no INTEGER NOT NULL,
+    ad TEXT NOT NULL,
+    nov TEXT NOT NULL,
+    olcu INTEGER DEFAULT 0,
+    xulase TEXT DEFAULT '',
+    meta TEXT DEFAULT '{}',
+    xam_metn TEXT DEFAULT '',
+    yaradildi INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_versiya_menbe ON menbe_versiyalari(menbe_id);
+
+  CREATE TABLE IF NOT EXISTS audit_jurnali (
+    id TEXT PRIMARY KEY,
+    emeliyyat TEXT NOT NULL,
+    obyekt_nov TEXT NOT NULL,
+    obyekt_id TEXT DEFAULT '',
+    detal TEXT DEFAULT '',
+    yaradildi INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_audit_tarix ON audit_jurnali(yaradildi);
 `);
+
+// Sütun miqrasiyası: Köhnə bazalarda yaddas.etibar_seviyyesi və menbeler.etibar_seviyyesi yoxdursa əlavə et
+try { db.exec("ALTER TABLE yaddas ADD COLUMN etibar_seviyyesi TEXT DEFAULT 'ai_sintezi';"); } catch (_) {}
+try { db.exec("ALTER TABLE menbeler ADD COLUMN etibar_seviyyesi TEXT DEFAULT 'orijinal_menbe';"); } catch (_) {}
+
+// Təhlükəsiz SQLite Tranzaksiya sarğısı (yarımçıq yazılmaların qarşısını alır)
+function tranzaksiyaIleIcraEt(fn) {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const netice = fn();
+    db.exec("COMMIT");
+    return netice;
+  } catch (err) {
+    try { db.exec("ROLLBACK"); } catch (_) {}
+    throw err;
+  }
+}
+
+function auditQeydEt(emeliyyat, obyekt_nov, obyekt_id = "", detal = "") {
+  try {
+    const id = "aud-" + crypto.randomUUID().slice(0, 10);
+    db.prepare(
+      "INSERT INTO audit_jurnali (id, emeliyyat, obyekt_nov, obyekt_id, detal, yaradildi) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(id, emeliyyat, obyekt_nov, String(obyekt_id || ""), String(detal || "").slice(0, 400), Date.now());
+  } catch (_) {}
+}
+
+function auditJurnaliniAl(limit = 50) {
+  return db.prepare("SELECT * FROM audit_jurnali ORDER BY yaradildi DESC LIMIT ?").all(limit);
+}
+
+function menbeVersiyasiSaxla(movcudMenbe) {
+  if (!movcudMenbe || !movcudMenbe.id) return null;
+  const son = db.prepare("SELECT MAX(versiya_no) as v FROM menbe_versiyalari WHERE menbe_id = ?").get(movcudMenbe.id);
+  const yeniNo = (son?.v || 0) + 1;
+  const vid = "ver-" + crypto.randomUUID().slice(0, 10);
+  db.prepare(`
+    INSERT INTO menbe_versiyalari (id, menbe_id, versiya_no, ad, nov, olcu, xulase, meta, xam_metn, yaradildi)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    vid,
+    movcudMenbe.id,
+    yeniNo,
+    movcudMenbe.ad || "",
+    movcudMenbe.nov || "txt",
+    movcudMenbe.olcu || 0,
+    movcudMenbe.xulase || "",
+    typeof movcudMenbe.meta === "string" ? movcudMenbe.meta : JSON.stringify(movcudMenbe.meta || {}),
+    String(movcudMenbe.xam_metn || "").slice(0, 1500000),
+    Date.now()
+  );
+  return { id: vid, versiya_no: yeniNo };
+}
+
+function menbeVersiyalariniAl(menbeId) {
+  return db.prepare(
+    "SELECT id, menbe_id, versiya_no, ad, nov, olcu, xulase, yaradildi FROM menbe_versiyalari WHERE menbe_id = ? ORDER BY versiya_no DESC"
+  ).all(menbeId);
+}
 
 function ilkinBazaHazirla() {
   const say = db.prepare("SELECT COUNT(*) as c FROM qovluqlar").get().c;
@@ -269,61 +352,67 @@ function menbeDetaliAl(id) {
   return m;
 }
 
-function menbeElaveEt({ qovluq_id, ad, nov, olcu = 0, xulase = "", meta = {}, xam_metn = "", parcalar = [] }) {
+function menbeElaveEt({ qovluq_id, ad, nov, olcu = 0, xulase = "", meta = {}, xam_metn = "", parcalar = [], etibar_seviyyesi = "" }) {
   const temizXam = String(xam_metn || "").slice(0, 3000000);
+  const seviye = etibar_seviyyesi || (meta?.canli_oyrenme ? "ekspert_tesdiqli" : "orijinal_menbe");
+  const indi = Date.now();
+  let id = "menbe-" + crypto.randomUUID().slice(0, 10);
 
-  // Dublikat yoxlaması: Eyni ad və ya eyni mətn artıq bazada varsa, köhnəsini yenilə ki təkrarlanma olmasın
-  if (temizXam.length > 80) {
-    const movcudlar = db.prepare("SELECT id, ad, substr(xam_metn, 1, 600) as ilk, length(xam_metn) as uz FROM menbeler WHERE qovluq_id = ?").all(qovluq_id);
-    const cariIlk = temizXam.slice(0, 600);
-    for (const m of movcudlar) {
-      if (m.ad === ad || (m.uz === temizXam.length && m.ilk === cariIlk)) {
-        db.prepare("DELETE FROM menbeler WHERE id = ?").run(m.id);
+  tranzaksiyaIleIcraEt(() => {
+    // Versiyalaşdırma + Dublikat qorunması: Eyni adlı sənəd varsa köhnəsini menbe_versiyalari cədvəlində arxivlə!
+    if (temizXam.length > 40) {
+      const movcudlar = db.prepare("SELECT * FROM menbeler WHERE qovluq_id = ?").all(qovluq_id);
+      const cariIlk = temizXam.slice(0, 600);
+      for (const m of movcudlar) {
+        if (m.ad === ad || (m.xam_metn && m.xam_metn.length === temizXam.length && m.xam_metn.slice(0, 600) === cariIlk)) {
+          menbeVersiyasiSaxla(m);
+          db.prepare("DELETE FROM menbeler WHERE id = ?").run(m.id);
+          id = m.id; // Eyni ID-ni qoru ki, köhnə versiyalarla əlaqə itməsin!
+        }
       }
     }
-  }
 
-  const id = "menbe-" + crypto.randomUUID().slice(0, 10);
-  const indi = Date.now();
-
-  db.prepare(`
-    INSERT INTO menbeler (id, qovluq_id, ad, nov, olcu, xulase, meta, xam_metn, aktiv, yaradildi)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-  `).run(
-    id,
-    qovluq_id,
-    ad,
-    nov,
-    olcu,
-    xulase,
-    JSON.stringify(meta || {}),
-    temizXam,
-    indi
-  );
-
-  const parcaYaz = db.prepare(`
-    INSERT INTO parcalar (id, menbe_id, qovluq_id, sira, basliq, metn, gonderen, tarix, meta, vektor, yaradildi)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  for (let i = 0; i < parcalar.length; i++) {
-    const p = parcalar[i];
-    const pid = "p-" + crypto.randomUUID().slice(0, 12);
-    parcaYaz.run(
-      pid,
+    db.prepare(`
+      INSERT INTO menbeler (id, qovluq_id, ad, nov, olcu, xulase, meta, xam_metn, aktiv, etibar_seviyyesi, yaradildi)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+    `).run(
       id,
       qovluq_id,
-      i + 1,
-      p.basliq || `${ad} #${i + 1}`,
-      p.metn || "",
-      p.gonderen || "",
-      p.tarix || "",
-      JSON.stringify(p.meta || {}),
-      p.vektor ? JSON.stringify(p.vektor) : null,
-      indi + i
+      ad,
+      nov,
+      olcu,
+      xulase,
+      JSON.stringify(meta || {}),
+      temizXam,
+      seviye,
+      indi
     );
-  }
 
+    const parcaYaz = db.prepare(`
+      INSERT INTO parcalar (id, menbe_id, qovluq_id, sira, basliq, metn, gonderen, tarix, meta, vektor, yaradildi)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    for (let i = 0; i < parcalar.length; i++) {
+      const p = parcalar[i];
+      const pid = "p-" + crypto.randomUUID().slice(0, 12);
+      parcaYaz.run(
+        pid,
+        id,
+        qovluq_id,
+        i + 1,
+        p.basliq || `${ad} #${i + 1}`,
+        p.metn || "",
+        p.gonderen || "",
+        p.tarix || "",
+        JSON.stringify(p.meta || {}),
+        p.vektor ? JSON.stringify(p.vektor) : null,
+        indi + i
+      );
+    }
+  });
+
+  auditQeydEt("menbe_elave", "menbe", id, `${ad} (${nov}, ${parcalar.length} blok, ${seviye})`);
   parcaKesiniSifirla();
   const yeniMenbe = menbeDetaliAl(id);
 
@@ -362,46 +451,51 @@ function menbeYenile({ id, ad, nov, olcu = 0, xulase = "", meta = {}, xam_metn =
   const temizXam = String(xam_metn || "").slice(0, 3000000);
   const indi = Date.now();
 
-  db.prepare(`
-    UPDATE menbeler
-    SET ad = ?, nov = ?, olcu = ?, xulase = ?, meta = ?, xam_metn = ?
-    WHERE id = ?
-  `).run(
-    ad || movcud.ad,
-    nov || movcud.nov,
-    olcu || Buffer.byteLength(temizXam, "utf8"),
-    xulase || movcud.xulase,
-    JSON.stringify(meta || {}),
-    temizXam,
-    id
-  );
+  tranzaksiyaIleIcraEt(() => {
+    // Köhnə versiyanı silmədən menbe_versiyalari cədvəlində arxivlə
+    menbeVersiyasiSaxla(movcud);
 
-  // Köhnə parçaları sil və yenilərini daxil et
-  db.prepare("DELETE FROM parcalar WHERE menbe_id = ?").run(id);
-
-  const parcaYaz = db.prepare(`
-    INSERT INTO parcalar (id, menbe_id, qovluq_id, sira, basliq, metn, gonderen, tarix, meta, vektor, yaradildi)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  for (let i = 0; i < parcalar.length; i++) {
-    const p = parcalar[i];
-    const pid = "p-" + crypto.randomUUID().slice(0, 12);
-    parcaYaz.run(
-      pid,
-      id,
-      movcud.qovluq_id,
-      i + 1,
-      p.basliq || `${ad || movcud.ad} #${i + 1}`,
-      p.metn || "",
-      p.gonderen || "",
-      p.tarix || "",
-      JSON.stringify(p.meta || {}),
-      p.vektor ? JSON.stringify(p.vektor) : null,
-      indi + i
+    db.prepare(`
+      UPDATE menbeler
+      SET ad = ?, nov = ?, olcu = ?, xulase = ?, meta = ?, xam_metn = ?
+      WHERE id = ?
+    `).run(
+      ad || movcud.ad,
+      nov || movcud.nov,
+      olcu || Buffer.byteLength(temizXam, "utf8"),
+      xulase || movcud.xulase,
+      JSON.stringify(meta || {}),
+      temizXam,
+      id
     );
-  }
 
+    db.prepare("DELETE FROM parcalar WHERE menbe_id = ?").run(id);
+
+    const parcaYaz = db.prepare(`
+      INSERT INTO parcalar (id, menbe_id, qovluq_id, sira, basliq, metn, gonderen, tarix, meta, vektor, yaradildi)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    for (let i = 0; i < parcalar.length; i++) {
+      const p = parcalar[i];
+      const pid = "p-" + crypto.randomUUID().slice(0, 12);
+      parcaYaz.run(
+        pid,
+        id,
+        movcud.qovluq_id,
+        i + 1,
+        p.basliq || `${ad || movcud.ad} #${i + 1}`,
+        p.metn || "",
+        p.gonderen || "",
+        p.tarix || "",
+        JSON.stringify(p.meta || {}),
+        p.vektor ? JSON.stringify(p.vektor) : null,
+        indi + i
+      );
+    }
+  });
+
+  auditQeydEt("menbe_yenile", "menbe", id, `${ad || movcud.ad} (${parcalar.length} blok — əvvəlki versiya arxivləndi)`);
   parcaKesiniSifirla();
   const yeniMenbe = menbeDetaliAl(id);
 
@@ -1040,16 +1134,24 @@ function praktikaKeysElaveEt({ basliq, sual = "", cavab = "", gonderen = "Eksper
   return menbeDetaliAl(movcud.id);
 }
 
-function yaddasElaveEt({ kateqoriya = "fakt", metn, menbe = "Söhbət", vaciblik = 3 }) {
+function yaddasElaveEt({ kateqoriya = "fakt", metn, menbe = "Söhbət", vaciblik = 3, etibar_seviyyesi = "" }) {
   if (!metn || !metn.trim()) return null;
   const təmiz = metn.trim();
+  const seviye =
+    etibar_seviyyesi ||
+    (menbe === "Birbaşa Təlimat" || menbe === "Ekspert Əks-Əlaqə" || menbe === "Telegram Ekspert Təsdiqi" || menbe === "Əl ilə əlavə"
+      ? "ekspert_tesdiqli"
+      : menbe === "Sistem Qaydası"
+        ? "orijinal_menbe"
+        : "ai_sintezi");
+
   const movcud = db.prepare("SELECT id FROM yaddas WHERE LOWER(metn) = LOWER(?)").get(təmiz);
   if (movcud) return movcud;
 
   // Semantik / açar söz oxşarlığı yoxlaması: Eyni mövzuda təkrar və ya yenilənmiş qayda varsa, köhnəsini yenilə ki baza ziddiyyətli dublikatlarla dolmasın
   const yeniKokler = new Set(sozKokleri(təmiz).map(k => k.normKok).filter(k => k.length >= 3));
   if (yeniKokler.size >= 3) {
-    const butunYaddas = db.prepare("SELECT id, metn, vaciblik FROM yaddas").all();
+    const butunYaddas = db.prepare("SELECT id, metn, vaciblik, etibar_seviyyesi FROM yaddas").all();
     for (const y of butunYaddas) {
       const kohneKokler = new Set(sozKokleri(y.metn).map(k => k.normKok).filter(k => k.length >= 3));
       if (kohneKokler.size < 3) continue;
@@ -1059,15 +1161,15 @@ function yaddasElaveEt({ kateqoriya = "fakt", metn, menbe = "Söhbət", vaciblik
       }
       const oxsarliq = kesisme / Math.min(yeniKokler.size, kohneKokler.size);
       if (oxsarliq >= 0.68) {
-        // Əgər köhnə qeyd "QIZIL QAYDA"dırsa və yeni gələn adi avtomatik analizdirsə, Qızıl Qaydanı qoru
-        if (y.metn.startsWith("QIZIL QAYDA") && !təmiz.startsWith("QIZIL QAYDA") && menbe !== "Birbaşa Təlimat") {
-          return { id: y.id, kateqoriya, metn: y.metn, menbe, vaciblik: y.vaciblik };
+        // Ekspert təsdiqli / Qızıl Qayda heç vaxt adi AI sintezi ilə əzilməməlidir!
+        if ((y.etibar_seviyyesi === "ekspert_tesdiqli" || y.metn.startsWith("QIZIL QAYDA")) && seviye === "ai_sintezi") {
+          return { id: y.id, kateqoriya, metn: y.metn, menbe, vaciblik: y.vaciblik, etibar_seviyyesi: y.etibar_seviyyesi };
         }
         const indi = Date.now();
         db.prepare(
-          "UPDATE yaddas SET kateqoriya = ?, metn = ?, menbe = ?, vaciblik = ?, yaradildi = ? WHERE id = ?"
-        ).run(kateqoriya, təmiz, menbe, Math.max(vaciblik, y.vaciblik || 3), indi, y.id);
-        return { id: y.id, kateqoriya, metn: təmiz, menbe, vaciblik, yaradildi: indi };
+          "UPDATE yaddas SET kateqoriya = ?, metn = ?, menbe = ?, vaciblik = ?, etibar_seviyyesi = ?, yaradildi = ? WHERE id = ?"
+        ).run(kateqoriya, təmiz, menbe, Math.max(vaciblik, y.vaciblik || 3), seviye, indi, y.id);
+        return { id: y.id, kateqoriya, metn: təmiz, menbe, vaciblik, etibar_seviyyesi: seviye, yaradildi: indi };
       }
     }
   }
@@ -1075,9 +1177,9 @@ function yaddasElaveEt({ kateqoriya = "fakt", metn, menbe = "Söhbət", vaciblik
   const id = "yad-" + crypto.randomUUID().slice(0, 8);
   const yaradildi = Date.now();
   db.prepare(
-    "INSERT INTO yaddas (id, kateqoriya, metn, menbe, vaciblik, yaradildi) VALUES (?, ?, ?, ?, ?, ?)"
-  ).run(id, kateqoriya, təmiz, menbe, vaciblik, yaradildi);
-  return { id, kateqoriya, metn: təmiz, menbe, vaciblik, yaradildi };
+    "INSERT INTO yaddas (id, kateqoriya, metn, menbe, vaciblik, etibar_seviyyesi, yaradildi) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  ).run(id, kateqoriya, təmiz, menbe, vaciblik, seviye, yaradildi);
+  return { id, kateqoriya, metn: təmiz, menbe, vaciblik, etibar_seviyyesi: seviye, yaradildi };
 }
 
 function yaddasRedakteEt(id, { kateqoriya, metn }) {
@@ -1170,7 +1272,7 @@ function bilikBosluqlariniTemizle() {
   return db.prepare("DELETE FROM bilik_bosluqlari").run();
 }
 
-// ---- Baza Yedəkləmə (Backup) və Vektor Statistikası ----
+// ---- Baza Yedəkləmə (Backup) və Bərpa (Restore) ----
 function bazaBackupHazirla() {
   try {
     db.exec("PRAGMA wal_checkpoint(TRUNCATE);");
@@ -1183,6 +1285,68 @@ function bazaBackupHazirla() {
     olcu: buffer.length,
     buffer
   };
+}
+
+/**
+ * Backup (.sqlite) faylından bütün əsas cədvəlləri tranzaksiya ilə təhlükəsiz bərpa edir (serveri söndürmədən!)
+ */
+function bazaBackupBerpaEt(sqliteBuffer) {
+  if (!Buffer.isBuffer(sqliteBuffer) || sqliteBuffer.length < 1024) {
+    throw new Error("Etibarsız SQLite backup faylı.");
+  }
+  const basliq = sqliteBuffer.subarray(0, 16).toString("utf8");
+  if (!basliq.startsWith("SQLite format 3")) {
+    throw new Error("Göndərilən fayl həqiqi SQLite3 bazası deyil.");
+  }
+
+  const tmpYol = path.join(DATA_DIR, `restore_tmp_${Date.now()}.sqlite`);
+  fs.writeFileSync(tmpYol, sqliteBuffer);
+
+  let backupDb = null;
+  try {
+    backupDb = new DatabaseSync(tmpYol, { readOnly: true });
+    const qovluqlar = backupDb.prepare("SELECT * FROM qovluqlar").all();
+    const menbeler = backupDb.prepare("SELECT * FROM menbeler").all();
+    const parcalar = backupDb.prepare("SELECT * FROM parcalar").all();
+    const yaddaslar = backupDb.prepare("SELECT * FROM yaddas").all();
+    let bosluqlar = [];
+    try { bosluqlar = backupDb.prepare("SELECT * FROM bilik_bosluqlari").all(); } catch (_) {}
+
+    tranzaksiyaIleIcraEt(() => {
+      db.exec("PRAGMA foreign_keys = OFF;");
+      db.exec("DELETE FROM parcalar; DELETE FROM menbeler; DELETE FROM qovluqlar; DELETE FROM yaddas; DELETE FROM bilik_bosluqlari;");
+
+      const qYaz = db.prepare("INSERT OR REPLACE INTO qovluqlar (id, ad, ikon, reng, aciqlama, yaradildi) VALUES (?, ?, ?, ?, ?, ?)");
+      for (const q of qovluqlar) qYaz.run(q.id, q.ad, q.ikon || "📁", q.reng || "#6366f1", q.aciqlama || "", q.yaradildi || Date.now());
+
+      const mYaz = db.prepare("INSERT OR REPLACE INTO menbeler (id, qovluq_id, ad, nov, olcu, xulase, meta, xam_metn, aktiv, etibar_seviyyesi, yaradildi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      for (const m of menbeler) mYaz.run(m.id, m.qovluq_id, m.ad, m.nov, m.olcu || 0, m.xulase || "", m.meta || "{}", m.xam_metn || "", m.aktiv ?? 1, m.etibar_seviyyesi || "orijinal_menbe", m.yaradildi || Date.now());
+
+      const pYaz = db.prepare("INSERT OR REPLACE INTO parcalar (id, menbe_id, qovluq_id, sira, basliq, metn, gonderen, tarix, meta, vektor, yaradildi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      for (const p of parcalar) pYaz.run(p.id, p.menbe_id, p.qovluq_id, p.sira || 1, p.basliq || "", p.metn || "", p.gonderen || "", p.tarix || "", p.meta || "{}", p.vektor || null, p.yaradildi || Date.now());
+
+      const yYaz = db.prepare("INSERT OR REPLACE INTO yaddas (id, kateqoriya, metn, menbe, vaciblik, etibar_seviyyesi, yaradildi) VALUES (?, ?, ?, ?, ?, ?, ?)");
+      for (const y of yaddaslar) yYaz.run(y.id, y.kateqoriya || "fakt", y.metn, y.menbe || "Backup", y.vaciblik || 3, y.etibar_seviyyesi || "ai_sintezi", y.yaradildi || Date.now());
+
+      const bYaz = db.prepare("INSERT OR REPLACE INTO bilik_bosluqlari (id, sual, movzu, menbe, say, status, yaradildi, son_sorulma) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+      for (const b of bosluqlar) bYaz.run(b.id, b.sual, b.movzu || "", b.menbe || "Backup", b.say || 1, b.status || "aciq", b.yaradildi || Date.now(), b.son_sorulma || Date.now());
+
+      db.exec("PRAGMA foreign_keys = ON;");
+    });
+
+    auditQeydEt("baza_berpa", "baza", "beyin.sqlite", `Backup bərpa edildi: ${menbeler.length} mənbə, ${parcalar.length} parça, ${yaddaslar.length} yaddaş`);
+    parcaKesiniSifirla();
+    return {
+      ok: true,
+      qovluqSayi: qovluqlar.length,
+      menbeSayi: menbeler.length,
+      parcaSayi: parcalar.length,
+      yaddasSayi: yaddaslar.length
+    };
+  } finally {
+    try { if (backupDb) backupDb.close(); } catch (_) {}
+    try { if (fs.existsSync(tmpYol)) fs.unlinkSync(tmpYol); } catch (_) {}
+  }
 }
 
 function vektorStatistikasiAl() {
@@ -1250,6 +1414,11 @@ module.exports = {
   bilikBosluguHellEt,
   bilikBosluqlariniTemizle,
   bazaBackupHazirla,
+  bazaBackupBerpaEt,
+  tranzaksiyaIleIcraEt,
+  menbeVersiyalariniAl,
+  auditQeydEt,
+  auditJurnaliniAl,
   vektorStatistikasiAl,
   vektorsuzParcalariAl,
   sohbetleriAl,

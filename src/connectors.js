@@ -731,11 +731,28 @@ async function tgUpdateEmalEt(token, update) {
     }
   }
 
-  // 1) Sənəd (PDF, Word, Excel, ZIP və s.) göndərilibsə
+  // 1) Sənəd (PDF, Word, Excel, ZIP, CSV və ya .sqlite Backup) göndərilibsə
   if (msg.document) {
     try {
       const { buffer } = await tgFaylEndir(token, msg.document.file_id);
       const faylAdi = msg.document.file_name || "telegram_sened.dat";
+
+      // Əgər istifadəçi əvvəlki /backup .sqlite faylını geri göndəribsə — bazanı 1 kliklə bərpa et!
+      if (/\.sqlite$/i.test(faylAdi) && typeof db.bazaBackupBerpaEt === "function") {
+        const net = db.bazaBackupBerpaEt(buffer);
+        await tgMesajGonder(
+          token,
+          chatId,
+          `♻️ <b>Baza Backup-dan Uğurla Bərpa Edildi!</b>\n\n` +
+          `• 📁 Qovluqlar: <b>${net.qovluqSayi}</b>\n` +
+          `• 📄 Mənbələr: <b>${net.menbeSayi}</b>\n` +
+          `• 🧩 Hissələr: <b>${net.parcaSayi}</b>\n` +
+          `• 🧠 Yaddaş Qaydaları: <b>${net.yaddasSayi}</b>\n\n` +
+          `✅ <i>Bütün əvvəlki bilikləriniz və sənədləriniz 100% geri qaytarıldı!</i>`
+        );
+        return;
+      }
+
       const emal = await parsers.faylEmalEt({
         buffer,
         faylAdi,

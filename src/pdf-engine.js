@@ -187,7 +187,8 @@ async function pdfMetnVeSehifeleriCixar(buffer) {
   const pdfDoc = await loadingTask.promise;
   const sehifeSayi = pdfDoc.numPages;
   const sehifeler = [];
-  const sonVaxt = Date.now() + 12000; // Lokal önizləmə üçün maksimum 12 saniyə (tam fayl onsuz da Google File API-yə gedir!)
+  const skanSehifeler = []; // Mətn qatı olmayan və ya çox az (<35 simvol) olan skan/şəkil səhifələri
+  const sonVaxt = Date.now() + 15000;
 
   for (let p = 1; p <= sehifeSayi; p++) {
     if (Date.now() > sonVaxt) break;
@@ -195,10 +196,17 @@ async function pdfMetnVeSehifeleriCixar(buffer) {
       const page = await pdfDoc.getPage(p);
       const textContent = await page.getTextContent();
       const sehifeMetn = koordinatlarlaSetirleriYig(textContent.items || []);
-      if (sehifeMetn && sehifeMetn.length >= 5) {
+      if (sehifeMetn && sehifeMetn.length >= 35) {
         sehifeler.push({ sehifeNo: p, metn: sehifeMetn });
+      } else {
+        skanSehifeler.push(p);
+        if (sehifeMetn && sehifeMetn.length >= 5) {
+          sehifeler.push({ sehifeNo: p, metn: sehifeMetn });
+        }
       }
-    } catch (_) {}
+    } catch (_) {
+      skanSehifeler.push(p);
+    }
   }
 
   if (pdfDoc && typeof pdfDoc.destroy === "function") {
@@ -211,6 +219,7 @@ async function pdfMetnVeSehifeleriCixar(buffer) {
     sehifeSayi,
     sehifeler: sehifeler.map(s => s.metn),
     sehifeObyektleri: sehifeler,
+    skanSehifeler,
     tamMetn: sehifeler.map(s => `=== [Səhifə ${s.sehifeNo}] ===\n${s.metn}`).join("\n\n")
   };
 }

@@ -47,17 +47,39 @@ function senedPasportuCixar(metn) {
     }
   }
 
+  // 6) Qanunvericilik Redaksiya Tarixi (sənəddəki ən son dəyişiklik / qüvvəyə minmə ili və tarixi)
+  const ilTap = Array.from(s.matchAll(/\b(20[12]\d)\s*(?:-?[cç]i|-?[cç]ı|-?[cç]u|-?[cç]ü)?\s*il(?:\s+(?:yanvar|fevral|mart|aprel|may|iyun|iyul|avqust|sentyabr|oktyabr|noyabr|dekabr)(?:ın|in|un|ün)?\s+\d{1,2})?/gi));
+  let enSonIl = 0;
+  let redaksiya_tarixi = "";
+  for (const uy of ilTap) {
+    const il = Number(uy[1]);
+    if (il >= 2010 && il <= 2030 && il >= enSonIl) {
+      enSonIl = il;
+      redaksiya_tarixi = uy[0].replace(/\s+/g, " ").trim();
+    }
+  }
+  if (!redaksiya_tarixi && tarixler.length > 0) {
+    const tarixIller = tarixler
+      .map(t => ({ t, m: t.match(/\b(20[12]\d)\b/) }))
+      .filter(x => x.m)
+      .sort((a, b) => Number(b.m[1]) - Number(a.m[1]));
+    if (tarixIller.length > 0) {
+      redaksiya_tarixi = tarixIller[0].t;
+    }
+  }
+
   return {
     meblegler,
     tarixler,
     kodlar,
     tapsiriqlar,
-    avto_qaydalar
+    avto_qaydalar,
+    redaksiya_tarixi
   };
 }
 
-// ---- 1. Daxili ZIP Açıcı (node:zlib ilə — xarici kitabxana olmadan) ----
-function zipAc(buffer) {
+// ---- 1. Daxili ZIP Açıcı (node:zlib ilə — ZIP Bomb və Path Traversal qorunması ilə) ----
+function zipAc(buffer, { maksFaylSayi = 150, maksCemiOlcu = 50 * 1024 * 1024, maksTekFayl = 25 * 1024 * 1024, maksSixilmaNisbeti = 100 } = {}) {
   const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
   let eocdPos = -1;
   const minPos = Math.max(0, buf.length - 65557);
@@ -70,13 +92,19 @@ function zipAc(buffer) {
   if (eocdPos < 0) throw new Error("ZIP strukturu tapılmadı və ya fayl zədələnib.");
 
   const girisSayi = buf.readUInt16LE(eocdPos + 10);
+  if (girisSayi > maksFaylSayi) {
+    throw new Error(`ZIP arxivində icazə verilən maksimum fayl sayı (${maksFaylSayi}) aşılıb (${girisSayi} fayl).`);
+  }
+
   let cdOffset = buf.readUInt32LE(eocdPos + 16);
   const fayllar = {};
+  let cemiAcilanBayt = 0;
 
   for (let i = 0; i < girisSayi; i++) {
     if (cdOffset + 46 > buf.length || buf.readUInt32LE(cdOffset) !== 0x02014b50) break;
     const metod = buf.readUInt16LE(cdOffset + 10);
     const sixilmishOlcu = buf.readUInt32LE(cdOffset + 20);
+    const acilmishOlcu = buf.readUInt32LE(cdOffset + 24);
     const adUzunluq = buf.readUInt16LE(cdOffset + 28);
     const elaveUzunluq = buf.readUInt16LE(cdOffset + 30);
     const serhUzunluq = buf.readUInt16LE(cdOffset + 32);
@@ -85,7 +113,13 @@ function zipAc(buffer) {
     const ad = buf.subarray(cdOffset + 46, cdOffset + 46 + adUzunluq).toString("utf8");
     cdOffset += 46 + adUzunluq + elaveUzunluq + serhUzunluq;
 
-    if (ad.endsWith("/")) continue;
+    if (ad.endsWith("/") || ad.includes("..")) continue;
+    if (acilmishOlcu > maksTekFayl) {
+      throw new Error(`ZIP daxilindəki "${ad}" faylı çox böyükdür (maks. ${Math.round(maksTekFayl / (1024 * 1024))} MB).`);
+    }
+    if (sixilmishOlcu > 0 && acilmishOlcu / sixilmishOlcu > maksSixilmaNisbeti) {
+      throw new Error(`Təhlükəsizlik qorunması: "${ad}" faylında anormal sıxılma nisbəti (ZIP bomb riski) aşkarlandı.`);
+    }
     if (yerliOffset + 30 > buf.length || buf.readUInt32LE(yerliOffset) !== 0x04034b50) continue;
 
     const yerliAdUz = buf.readUInt16LE(yerliOffset + 26);
@@ -94,12 +128,24 @@ function zipAc(buffer) {
     const xamData = buf.subarray(dataBaslangic, dataBaslangic + sixilmishOlcu);
 
     try {
+      let acilmis = null;
       if (metod === 0) {
-        fayllar[ad] = xamData;
+        acilmis = xamData;
       } else if (metod === 8) {
-        fayllar[ad] = zlib.inflateRawSync(xamData);
+        acilmis = zlib.inflateRawSync(xamData, { maxOutputLength: maksTekFayl });
       }
-    } catch (_) {}
+      if (acilmis) {
+        cemiAcilanBayt += acilmis.length;
+        if (cemiAcilanBayt > maksCemiOlcu) {
+          throw new Error(`ZIP arxivinin açılmış ümumi ölçüsü maksimum limiti (${Math.round(maksCemiOlcu / (1024 * 1024))} MB) aşır.`);
+        }
+        fayllar[ad] = acilmis;
+      }
+    } catch (e) {
+      if (e && /maksimum|ZIP bomb|çox böyükdür|maxOutputLength/i.test(e.message || "")) {
+        throw e;
+      }
+    }
   }
 
   return fayllar;
@@ -721,14 +767,102 @@ function xlsxOxu(buffer, faylAdi) {
   };
 }
 
-// ---- 8. PDF Oxuyucusu (Mozilla PDF.js + Səhifə-səhifə Parçalama + Multimodal Vision OCR) ----
+// ---- 7b. CSV Cədvəl Oxuyucusu (RFC-4180 dırnaq, vergül/nöqtəli-vergül/tab avtomatik ayırıcı) ----
+function csvSetriParcala(setir, ayirici = ",") {
+  const xanalar = [];
+  let cari = "";
+  let dirnaqda = false;
+
+  for (let i = 0; i < setir.length; i++) {
+    const ch = setir[i];
+    if (ch === '"') {
+      if (dirnaqda && setir[i + 1] === '"') {
+        cari += '"';
+        i++;
+      } else {
+        dirnaqda = !dirnaqda;
+      }
+    } else if (ch === ayirici && !dirnaqda) {
+      xanalar.push(cari.trim());
+      cari = "";
+    } else {
+      cari += ch;
+    }
+  }
+  xanalar.push(cari.trim());
+  return xanalar;
+}
+
+function csvOxu(buffer, faylAdi) {
+  let xam = Buffer.from(buffer).toString("utf8").replace(/^\uFEFF/, "");
+  const xamSetirler = xam.split(/\r?\n/).filter(s => s.trim().length > 0);
+  if (xamSetirler.length === 0) {
+    return {
+      nov: "csv",
+      xulase: `CSV cədvəli • boş fayl`,
+      meta: { setir_sayi: 0, sutun_sayi: 0, pasport: senedPasportuCixar("") },
+      xam_metn: "",
+      parcalar: []
+    };
+  }
+
+  // İlk sətirdən ən çox istifadə olunan ayırıcını (, ; \t) avtomatik tap
+  const ilk = xamSetirler[0];
+  const namizedler = [",", ";", "\t"];
+  let ayirici = ",";
+  let maksSay = 0;
+  for (const sep of namizedler) {
+    const say = csvSetriParcala(ilk, sep).length;
+    if (say > maksSay) {
+      maksSay = say;
+      ayirici = sep;
+    }
+  }
+
+  const cedvel = xamSetirler.map(s => csvSetriParcala(s, ayirici));
+  const basliqlar = cedvel[0];
+  const melumatSetirleri = cedvel.slice(1);
+
+  const formatliSetirler = [basliqlar.join(" | ")];
+  for (const row of melumatSetirleri) {
+    if (row.every(x => !x)) continue;
+    const elaqeli = row
+      .map((val, idx) => (basliqlar[idx] ? `${basliqlar[idx]}: ${val}` : val))
+      .filter(Boolean)
+      .join(" | ");
+    formatliSetirler.push(elaqeli);
+  }
+
+  const tamMetn =
+    `=== CSV Cədvəli (${faylAdi}) | Sütunlar: ${basliqlar.join(" | ")} ===\n` +
+    formatliSetirler.join("\n");
+
+  const parcalar = metniParcala(tamMetn, `${faylAdi} [CSV Cədvəl]`, 1600, 150);
+
+  return {
+    nov: "csv",
+    xulase: `CSV cədvəli • ${melumatSetirleri.length} sətir • ${basliqlar.length} sütun`,
+    meta: {
+      setir_sayi: melumatSetirleri.length,
+      sutun_sayi: basliqlar.length,
+      sutunlar: basliqlar,
+      ayirici,
+      pasport: senedPasportuCixar(tamMetn)
+    },
+    xam_metn: tamMetn,
+    parcalar
+  };
+}
+
+// ---- 8. PDF Oxuyucusu (Mozilla PDF.js + Səhifə-səhifə Parçalama + Hibrid / Skan Səhifə OCR) ----
 async function pdfOxu(buffer, faylAdi) {
   const baslangicVaxt = Date.now();
-  const { sehifeler, sehifeObyektleri, tamMetn } = await pdfMetnVeSehifeleriCixar(buffer);
+  const { sehifeSayi, sehifeler, sehifeObyektleri, skanSehifeler = [], tamMetn } = await pdfMetnVeSehifeleriCixar(buffer);
   let metn = tamMetn;
-  let usul = `Mozilla PDF.js Mühərriki (${sehifeler.length} səhifə, ${Date.now() - baslangicVaxt}ms)`;
+  let usul = `Mozilla PDF.js Mühərriki (${sehifeSayi || sehifeler.length} səhifə, ${Date.now() - baslangicVaxt}ms)`;
+  let ocrElaveMetn = "";
 
-  // Yalnız mətn qatında heç nə tapılmadıqda (skan edilmiş PDF olduqda) və ölçü < 12 MB olduqda AI Vision OCR çağır
+  // 1) Tamamilə skan edilmiş PDF (<80 simvol) olduqda — tam fayl Vision OCR
   if (metn.length < 80 && buffer.length < 12 * 1024 * 1024) {
     const aiAnaliz = await ai.mediaAnalizEt({
       buffer,
@@ -739,6 +873,22 @@ async function pdfOxu(buffer, faylAdi) {
       metn = aiAnaliz.metn;
       usul = aiAnaliz.usul;
     }
+  } else if (skanSehifeler.length > 0 && buffer.length < 12 * 1024 * 1024) {
+    // 2) Hibrid PDF (bəzi səhifələri mətn, bəzi səhifələri skan şəkil olduqda) — yalnız skan səhifələr üçün hədəfli Vision OCR!
+    const skanSiyahiStr = skanSehifeler.slice(0, 20).join(", ");
+    const aiAnaliz = await ai.mediaAnalizEt({
+      buffer,
+      mimeType: "application/pdf",
+      faylAdi,
+      xususiPrompt: `Bu PDF sənədində aşağıdakı səhifələr skan edilmiş şəkil formatındadır və mətn qatı yoxdur: Səhifə ${skanSiyahiStr}. Zəhmət olmasa YALNIZ həmin skan edilmiş səhifələrdəki (${skanSiyahiStr}) bütün yazıları, cədvəlləri, rəqəmləri və maddələri səhifə nömrəsi ilə birlikdə ("=== [Səhifə X - OCR] ===") tam oxuyub çıxar.`
+    });
+    if (aiAnaliz && aiAnaliz.ugurlu && aiAnaliz.metn && aiAnaliz.metn.length > 30) {
+      ocrElaveMetn = aiAnaliz.metn;
+      metn += `\n\n=== [Hibrid Skan Səhifələr OCR: Səhifə ${skanSiyahiStr}] ===\n${ocrElaveMetn}`;
+      usul += ` + Hibrid OCR (${skanSehifeler.length} skan səhifə)`;
+    } else {
+      usul += ` (${skanSehifeler.length} skan səhifə aşkarlandı)`;
+    }
   }
 
   let parcalar = [];
@@ -747,9 +897,13 @@ async function pdfOxu(buffer, faylAdi) {
       const sehifeParcalari = metniParcala(sObj.metn, `${faylAdi} [Səhifə ${sObj.sehifeNo}]`, 1600, 200);
       parcalar.push(...sehifeParcalari);
     });
+    if (ocrElaveMetn) {
+      const ocrParcalari = metniParcala(ocrElaveMetn, `${faylAdi} [Skan OCR: Səh. ${skanSehifeler.slice(0, 10).join(",")}]`, 1600, 200);
+      parcalar.push(...ocrParcalari);
+    }
   } else {
     if (!metn || metn.trim().length < 10) {
-      metn = `[PDF Sənədi: ${faylAdi} (${Math.round(buffer.length / 1024)} KB). Bu PDF skan edilmiş şəkil formatındadır. Skan olunmuş PDF-lərin avtomatik oxunması üçün sağ yuxarıdakı ⚙️ AI Mühərriki bölməsindən pulsuz Gemini API açarını daxil edin.]`;
+      metn = `[PDF Sənədi: ${faylAdi} (${Math.round(buffer.length / 1024)} KB). Bu PDF skan edilmiş şəkil formatındadır. Skan olunmuş PDF-lərin avtomatik oxunması üçün sağ yuxarıdakı ⚙️ AI Mühərriki bölməsindən Gemini API açarını daxil edin.]`;
     }
     parcalar = metniParcala(metn, faylAdi);
   }
@@ -758,10 +912,11 @@ async function pdfOxu(buffer, faylAdi) {
 
   return {
     nov: "pdf",
-    xulase: `PDF sənədi • ${sehifeler.length || 1} səhifə • ${parcalar.length} blok (${usul})`,
+    xulase: `PDF sənədi • ${sehifeSayi || sehifeler.length || 1} səhifə • ${parcalar.length} blok (${usul})`,
     meta: {
       usul,
-      sehife_sayi: sehifeler.length || 1,
+      sehife_sayi: sehifeSayi || sehifeler.length || 1,
+      skan_sehifeler: skanSehifeler,
       parca_sayi: parcalar.length,
       pasport
     },
@@ -1000,6 +1155,10 @@ async function faylEmalEt({ buffer, faylAdi, mimeType = "" }) {
     };
   }
 
+  if (uzanti === ".csv" || mimeType === "text/csv" || mimeType === "application/csv") {
+    return csvOxu(buffer, faylAdi);
+  }
+
   if (uzanti === ".pdf" || mimeType === "application/pdf") {
     return await pdfOxu(buffer, faylAdi);
   }
@@ -1074,6 +1233,7 @@ module.exports = {
   telegramJsonOxu,
   docxOxu,
   xlsxOxu,
+  csvOxu,
   pdfOxu,
   linkOxu,
   faylEmalEt
