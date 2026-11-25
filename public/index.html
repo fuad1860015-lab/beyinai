@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BeyinAI — Şəxsi AI Asistant</title>
-  <link rel="stylesheet" href="/style.css?v=3.1" />
+  <link rel="stylesheet" href="/style.css?v=4.0" />
 </head>
 <body>
   <!-- 1. ÜST PANEL: Sakit, səliqəli və təmiz -->
@@ -17,6 +17,13 @@
       <h1 class="brend-ad">BeyinAI</h1>
     </div>
 
+    <!-- Kitabxana və Bilik Sahəsi Seçicisi -->
+    <div class="kitabxana-sahe-badge" id="btnKitabxanaSecici" title="Kitabxana Sahələri və Öyrənilmiş Mövzular">
+      <span class="sahe-ikon" id="aktivSaheIkon">💼</span>
+      <span class="sahe-ad" id="aktivSaheAd">Vergi və Mühasibatlıq</span>
+      <span class="sahe-ox">▾</span>
+    </div>
+
     <!-- Mərkəzdə aktiv qovluq adı -->
     <div class="aktiv-qovluq-badge" id="aktivQovluqGosterici">
       🌐 Mərkəzi Beyin
@@ -24,6 +31,15 @@
 
     <!-- Sağda: Yalnız zəruri AI statusu və tənzimləmələr -->
     <div class="ust-sag">
+      <button class="haqq-hesab-btn" id="btnHaqqHesabAc" title="Maaş, Məzuniyyət və Son Haqq-Hesab Kalkulyatoru">
+        📋 Haqq-Hesab
+      </button>
+      <button class="simulyator-btn" id="btnSimulyatorAc" title="Avtonom Sınaq və Praktiki Keys Simulyatoru">
+        🧪 Sınaq Mərkəzi
+      </button>
+      <button class="bildiris-zeng-btn" id="btnBildirislerToggle" title="Vergi Təqvimi və Avtonom Bildirişlər">
+        🔔 <span class="bildiris-saygac" id="bildirisSaygac" style="display:none;">0</span>
+      </button>
       <button class="derin-rejim-btn aktiv" id="btnDerinRejim" title="Dərin Təhlil Rejimi">
         🧠 Dərin Təhlil
       </button>
@@ -278,11 +294,263 @@
     </div>
   </div>
 
+  <!-- 3d. Kitabxana və Bilik Sahələri Modalı -->
+  <div class="modal-arka" id="modalKitabxana" hidden>
+    <div class="modal-qutu" style="max-width: 620px;">
+      <div class="modal-basliq">
+        <h2>📚 BeyinAI Kitabxanası — Bilik Sahələri</h2>
+        <button class="modal-bagla" data-close="modalKitabxana">✕</button>
+      </div>
+      <div class="modal-govde">
+        <p style="font-size:12px; color:var(--metn-solgun); margin-bottom:12px; line-height:1.5;">
+          BeyinAI bütün sahələri bir-birinə qarışdırmır. Hər fənn və ya sahə müstəqil kitabxana rəfi kimi saxlanılır. Əsas istiqamət seçildikdə, ona birbaşa aid olan sahələr avtomatik əlaqələndirilir, kənar mövzular isə yaddaşı zibilləmir.
+        </p>
+
+        <!-- Sahələr Rəfi -->
+        <div class="saheler-lent-qabi">
+          <label style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--metn-solgun); letter-spacing:0.5px;">Kitabxana Rəfləri (Sahələr):</label>
+          <div class="saheler-kartlar-qabi" id="sahelerKartlarQabi"></div>
+        </div>
+
+        <!-- Seçilmiş Sahənin Öyrənilmiş Mövzuları -->
+        <div style="margin-top:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <label style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--metn-solgun); letter-spacing:0.5px;">Öyrənilmiş Mövzular və Normalar (<span id="oyrenilmisMovzuSay">0</span>):</label>
+          </div>
+          <div class="movzular-siyahisi" id="saheMovzulariSiyahisi"></div>
+        </div>
+
+        <!-- Yeni Sahə Yaratma Bölməsi -->
+        <div style="margin-top:16px; border-top:1px solid rgba(255,255,255,0.08); padding-top:12px;">
+          <details>
+            <summary style="font-size:12px; font-weight:600; cursor:pointer; color:#818cf8;">➕ Yeni Müstəqil Sahə Əlavə Et (məs: Proqramlaşdırma, Coğrafiya...)</summary>
+            <form id="formYeniSahe" style="margin-top:10px; display:flex; flex-direction:column; gap:8px;">
+              <input type="text" id="yeniSaheAd" placeholder="Sahənin adı (məs: Proqramlaşdırma)" required />
+              <input type="text" id="yeniSaheAciqlama" placeholder="Qısa təsvir" />
+              <div style="display:flex; gap:8px;">
+                <input type="text" id="yeniSaheIkon" placeholder="İkon" style="width:70px;" value="📚" />
+                <button type="submit" class="duyme esas" style="flex:1;">Sahəni Yarat</button>
+              </div>
+            </form>
+          </details>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sınaq və Praktiki Təcrübə Simulyatoru Modalı (Level C Depth) -->
+  <div class="modal-arxa" id="modalSimulyator" hidden>
+    <div class="modal-pencere" style="max-width: 840px; width: 95vw;">
+      <div class="modal-basliq">
+        <span style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:20px;">🧪</span>
+          <span>Sınaq və Praktiki Təcrübə Mərkəzi (Level C Depth)</span>
+        </span>
+        <button type="button" class="kicik-duyme" id="btnSimulyatorBagla">✕</button>
+      </div>
+      <div class="modal-icerik" style="max-height: 80vh; overflow-y: auto;">
+        <!-- Statistika Kartları -->
+        <div class="sim-stat-zolaq">
+          <div class="sim-stat-kart">
+            <span class="sim-stat-say" id="statSimUmumi">0</span>
+            <span class="sim-stat-etiket">İcra Edilmiş Sınaq</span>
+          </div>
+          <div class="sim-stat-kart">
+            <span class="sim-stat-say" id="statSimBal">0%</span>
+            <span class="sim-stat-etiket">Orta Müvəffəqiyyət</span>
+          </div>
+          <div class="sim-stat-kart">
+            <span class="sim-stat-say" id="statSimDersler">0</span>
+            <span class="sim-stat-etiket">Yaddaşa Yazılmış Dərs</span>
+          </div>
+        </div>
+
+        <!-- Avtonom Planlayıcı & Tezlik Tənzimləməsi -->
+        <div class="sim-planlayici-zolaq">
+          <div style="display:flex; align-items:center; gap:8px; flex:1; flex-wrap:wrap;">
+            <span style="font-size:12px; font-weight:600; color:#cbd5e1;">⏱️ Avtonom Tədqiqat Tezliyi:</span>
+            <select id="selectSchedulerTezlik" class="secici-qutu">
+              <option value="gunde_1">Gündə 1 dəfə (Tövsiyə olunan)</option>
+              <option value="gunde_2">Gündə 2 dəfə (12 saatdan bir)</option>
+              <option value="gunde_3">Gündə 3 dəfə (8 saatdan bir)</option>
+              <option value="heftede_1">Həftədə 1 dəfə</option>
+              <option value="ayda_1">Ayda 1 dəfə</option>
+              <option value="hec_vaxt">Söndürülüb (Yalnız əl ilə)</option>
+            </select>
+          </div>
+          <button type="button" class="kicik-duyme-xususi" id="btnSchedulerIndiIcra" title="Planlaşdırılmış dövrəni dərhal işə sal">
+            🚀 İndi Tədqiq Et
+          </button>
+        </div>
+
+        <!-- Vergi Təqvimi Xəbərdarlıq Zolağı -->
+        <div id="simTeqvimZolagi" class="sim-teqvim-qutusu" style="display:none;"></div>
+
+        <!-- Fəaliyyət Düymələri -->
+        <div style="display:flex; gap:8px; margin: 14px 0; flex-wrap:wrap;">
+          <button type="button" class="duyme esas" id="btnSimIcraEt" style="display:flex; align-items:center; gap:6px;">
+            <span>⚡</span> <span id="btnSimIcraMetn">Seçilmiş Keysi Sınaqdan Keçir</span>
+          </button>
+          <button type="button" class="duyme" id="btnSimCarpazMadde" style="display:flex; align-items:center; gap:6px; background:rgba(168,85,247,0.16); border:1px solid rgba(168,85,247,0.4); color:#e9d5ff;">
+            <span>🔀</span> <span>Çarpaz Maddə Sınağı</span>
+          </button>
+          <button type="button" class="duyme" id="btnSimCanliCat" style="display:flex; align-items:center; gap:6px; background:rgba(14,165,233,0.16); border:1px solid rgba(14,165,233,0.4); color:#bae6fd;">
+            <span>💬</span> <span>Canlı Çat Müzakirəsi</span>
+          </button>
+          <button type="button" class="duyme" id="btnSimAvtoTedqiq" style="display:flex; align-items:center; gap:6px; background:rgba(255,255,255,0.08);">
+            <span>🔍</span> <span>Boşluqları Tədqiq Et</span>
+          </button>
+        </div>
+
+        <!-- Özünü-İnkişaf v2.0 Panelləri: Qaralama Dəftəri, Boz Zona və Düşünmə Qaydaları -->
+        <div class="tekamul-bolmeler-qabi">
+          <div class="tekamul-qutu">
+            <div class="tekamul-qutu-basliq">
+              <span>📝 Qaralama Dəftəri — Təsdiq Gözləyən Dərslər (<span id="sayQaralama">0</span>)</span>
+            </div>
+            <div id="tekamulQaralamalarQabi" class="tekamul-siyahi"></div>
+          </div>
+
+          <div class="tekamul-qutu">
+            <div class="tekamul-qutu-basliq">
+              <span>⚖️ Boz Zona Dosyeləri — İş Siyasəti Qərarı (<span id="sayBozZona">0</span>)</span>
+            </div>
+            <div id="tekamulBozZonaQabi" class="tekamul-siyahi"></div>
+          </div>
+
+          <div class="tekamul-qutu">
+            <div class="tekamul-qutu-basliq">
+              <span>🧬 Düşünmə Alqoritmi ("Niyə səhv etdim?") & 📜 Dövr Arxivi (<span id="sayDusunmeQayda">0</span>)</span>
+            </div>
+            <div id="tekamulDusunmeQabi" class="tekamul-siyahi"></div>
+          </div>
+        </div>
+
+        <!-- Ssenari Seçimi -->
+        <div style="margin-bottom:14px;">
+          <label style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--metn-solgun); letter-spacing:0.5px;">Sınaq Keysləri Bankı:</label>
+          <div class="sim-ssenariler-qabi" id="simSsenarilerQabi"></div>
+        </div>
+
+        <!-- Canlı Sınaq Nəticəsi Göstərici -->
+        <div id="simCanliNeticeQutusu" style="display:none; margin-bottom:16px;">
+          <div class="sim-netice-karti" id="simNeticeKarti"></div>
+        </div>
+
+        <!-- Keçmiş Sınaqlar Tarixçəsi -->
+        <div>
+          <label style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--metn-solgun); letter-spacing:0.5px;">Son İcra Edilmiş Sınaqlar və Təcrübə Dərsləri:</label>
+          <div class="sim-tarixce-siyahisi" id="simTarixceSiyahisi"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Maaş, Məzuniyyət və Son Haqq-Hesab Modalı -->
+  <div class="modal-arxa" id="modalHaqqHesab" hidden>
+    <div class="modal-pencere" style="max-width: 780px; width: 95vw;">
+      <div class="modal-basliq">
+        <span style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:20px;">📋</span>
+          <span>Maaş, Məzuniyyət və Son Haqq-Hesab Hesabat Generatoru</span>
+        </span>
+        <button type="button" class="kicik-duyme" id="btnHaqqHesabBagla">✕</button>
+      </div>
+      <div class="modal-icerik" style="max-height: 80vh; overflow-y: auto;">
+        <form id="formHaqqHesab" style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+          <div>
+            <label class="forma-etiket">İşçinin Adı və Soyadı:</label>
+            <input type="text" id="hhIsciAd" placeholder="məs: Əli Məmmədov" value="Əli Məmmədov" required />
+          </div>
+          <div>
+            <label class="forma-etiket">Vəzifəsi:</label>
+            <input type="text" id="hhVezife" placeholder="məs: Baş Mühasib" value="Mütəxəssis" />
+          </div>
+          <div>
+            <label class="forma-etiket">Aylıq Əməkhaqqı (AZN):</label>
+            <div style="display:flex; gap:6px;">
+              <input type="number" step="0.01" id="hhMaas" value="1500" required style="flex:1;" />
+              <select id="hhMaasTipi" class="secici-qutu" style="width:90px;">
+                <option value="gross">Gross</option>
+                <option value="net">Net</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label class="forma-etiket">Sektor:</label>
+            <select id="hhSektor" class="secici-qutu">
+              <option value="ozel">Qeyri-dövlət / Qeyri-neft (Güzəştli)</option>
+              <option value="dovlet">Dövlət / Neft-qaz sektoru</option>
+            </select>
+          </div>
+          <div>
+            <label class="forma-etiket">İşə Qəbul Tarixi:</label>
+            <input type="date" id="hhIseQebul" value="2025-01-15" />
+          </div>
+          <div>
+            <label class="forma-etiket">İşdən Çıxma Tarixi (və ya Cari gün):</label>
+            <input type="date" id="hhIsdenCixma" />
+          </div>
+          <div>
+            <label class="forma-etiket">İllik Məzuniyyət Günləri:</label>
+            <input type="number" id="hhIllikMezuniyyet" value="21" min="21" max="56" />
+          </div>
+          <div>
+            <label class="forma-etiket">İstifadə Edilmiş Məzuniyyət (gün):</label>
+            <input type="number" id="hhIstifadeEdilmis" value="0" min="0" />
+          </div>
+          <div>
+            <label class="forma-etiket">Cari Ayın İş Günləri Sayı:</label>
+            <input type="number" id="hhAyIsGunleri" value="22" min="1" max="31" />
+          </div>
+          <div>
+            <label class="forma-etiket">Cari Ayda Faktiki İşlənmiş Günlər:</label>
+            <input type="number" id="hhIslenmisGunler" value="22" min="0" max="31" />
+          </div>
+          <div style="grid-column: span 2; margin-top:6px;">
+            <button type="submit" class="duyme esas" style="width:100%; padding:10px;">
+              🧮 Rəsmi Çıxarış və Hesabatı Qur
+            </button>
+          </div>
+        </form>
+
+        <!-- Hesabat Nəticəsi -->
+        <div id="hhNeticeQutusu" style="display:none; margin-top:16px;">
+          <div style="display:flex; justify-content:flex-end; gap:8px; margin-bottom:8px;">
+            <button type="button" class="mini-btn" id="btnHhCapEt">🖨️ Çap Et / PDF</button>
+            <button type="button" class="mini-btn" id="btnHhKopyala">📋 Çıxarışı Kopyala</button>
+          </div>
+          <div id="hhHesabatIcerik" class="hh-hesabat-lohvasi"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Veb Bildirişlər və Vergi Təqvimi Modalı -->
+  <div class="modal-arxa" id="modalBildirisler" hidden>
+    <div class="modal-pencere" style="max-width: 600px; width: 95vw;">
+      <div class="modal-basliq">
+        <span style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:20px;">🔔</span>
+          <span>Bildirişlər və Vergi Təqvimi</span>
+        </span>
+        <button type="button" class="kicik-duyme" id="btnBildirislerBagla">✕</button>
+      </div>
+      <div class="modal-icerik" style="max-height: 75vh; overflow-y: auto;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <span style="font-size:12px; color:var(--metn-solgun);">Avtonom tədqiqat və təqvim xəbərdarlıqları</span>
+          <button type="button" class="mini-btn" id="btnBildirisleriTemizle">Təmizlə</button>
+        </div>
+        <div id="bildirislerSiyahisi" class="bildirisler-siyahisi"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Gizli Köməkçilər -->
   <div id="bildirisQutusu" class="bildiris-qutusu" hidden></div>
   <div id="modalBaglantilar" hidden><input type="text" id="bagTgToken" /><button id="btnTgQos"></button><span id="tgStatusEtiket"></span><span id="nlmKorpuStatusEtiket"></span><button id="btnBookmarkletKopyala"></button><a id="wpBookmarkletLink" href="#"></a><div id="tgMelumatQutusu"></div></div>
 
-  <script src="/app.js?v=3.4"></script>
+  <script src="/app.js?v=4.0"></script>
   <script>
     document.addEventListener("DOMContentLoaded", () => {
       const btnToggle = document.getElementById("btnPanelToggle");

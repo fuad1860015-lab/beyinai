@@ -70,6 +70,143 @@ body {
   letter-spacing: -0.3px;
 }
 
+.kitabxana-sahe-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: #34d399;
+  padding: 4px 12px;
+  border-radius: 99px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+.kitabxana-sahe-badge:hover {
+  background: rgba(16, 185, 129, 0.22);
+  border-color: rgba(16, 185, 129, 0.6);
+  transform: translateY(-1px);
+}
+.kitabxana-sahe-badge .sahe-ox {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.saheler-kartlar-qabi {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.sahe-karti {
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid var(--serhed);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sahe-karti:hover {
+  border-color: rgba(99, 102, 241, 0.5);
+  background: rgba(30, 41, 59, 0.7);
+}
+
+.sahe-karti.aktiv {
+  border-color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.sahe-karti-ust {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sahe-karti-ad {
+  font-weight: 600;
+  font-size: 13px;
+  color: #f1f5f9;
+}
+
+.sahe-karti-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(99, 102, 241, 0.2);
+  color: #818cf8;
+}
+
+.sahe-karti.aktiv .sahe-karti-badge {
+  background: rgba(16, 185, 129, 0.25);
+  color: #34d399;
+}
+
+.sahe-karti-aciqlama {
+  font-size: 11px;
+  color: var(--metn-solgun);
+  line-height: 1.4;
+}
+
+.sahe-karti-stat {
+  font-size: 10.5px;
+  color: #94a3b8;
+  margin-top: 4px;
+}
+
+.movzular-siyahisi {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 190px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.movzu-satiri {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+
+.movzu-satiri-sol {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.movzu-satiri-ad {
+  font-weight: 500;
+  color: #e2e8f0;
+}
+
+.movzu-satiri-detal {
+  font-size: 10.5px;
+  color: var(--metn-solgun);
+}
+
+.movzu-status-badge {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  font-weight: 600;
+}
+
 .aktiv-qovluq-badge {
   background: rgba(30, 41, 59, 0.6);
   border: 1px solid var(--serhed);
@@ -1172,7 +1309,144 @@ body {
 
 /* Mobil və Planşet Uyğunlaşması (Responsive Media Queries) */
 @media (max-width: 900px) {
-  .aktiv-qovluq-badge {
+  .kitabxana-sahe-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: #34d399;
+  padding: 4px 12px;
+  border-radius: 99px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+.kitabxana-sahe-badge:hover {
+  background: rgba(16, 185, 129, 0.22);
+  border-color: rgba(16, 185, 129, 0.6);
+  transform: translateY(-1px);
+}
+.kitabxana-sahe-badge .sahe-ox {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.saheler-kartlar-qabi {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.sahe-karti {
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid var(--serhed);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sahe-karti:hover {
+  border-color: rgba(99, 102, 241, 0.5);
+  background: rgba(30, 41, 59, 0.7);
+}
+
+.sahe-karti.aktiv {
+  border-color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.sahe-karti-ust {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sahe-karti-ad {
+  font-weight: 600;
+  font-size: 13px;
+  color: #f1f5f9;
+}
+
+.sahe-karti-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(99, 102, 241, 0.2);
+  color: #818cf8;
+}
+
+.sahe-karti.aktiv .sahe-karti-badge {
+  background: rgba(16, 185, 129, 0.25);
+  color: #34d399;
+}
+
+.sahe-karti-aciqlama {
+  font-size: 11px;
+  color: var(--metn-solgun);
+  line-height: 1.4;
+}
+
+.sahe-karti-stat {
+  font-size: 10.5px;
+  color: #94a3b8;
+  margin-top: 4px;
+}
+
+.movzular-siyahisi {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 190px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.movzu-satiri {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+
+.movzu-satiri-sol {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.movzu-satiri-ad {
+  font-weight: 500;
+  color: #e2e8f0;
+}
+
+.movzu-satiri-detal {
+  font-size: 10.5px;
+  color: var(--metn-solgun);
+}
+
+.movzu-status-badge {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  font-weight: 600;
+}
+
+.aktiv-qovluq-badge {
     display: none;
   }
 
@@ -1250,4 +1524,359 @@ body {
   .sag-panel {
     max-width: 100%;
   }
+}
+
+/* Sınaq və Praktiki Təcrübə Simulyatoru Düyməsi & Modalı (Level C Depth) */
+.simulyator-btn {
+  background: rgba(139, 92, 246, 0.15);
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  color: #c084fc;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+.simulyator-btn:hover {
+  background: rgba(139, 92, 246, 0.28);
+  border-color: rgba(139, 92, 246, 0.7);
+  color: #e9d5ff;
+  transform: translateY(-1px);
+}
+
+.sim-stat-zolaq {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.sim-stat-kart {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 10px 12px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sim-stat-say {
+  font-size: 18px;
+  font-weight: 700;
+  color: #38bdf8;
+}
+.sim-stat-etiket {
+  font-size: 11px;
+  color: var(--metn-solgun);
+}
+
+.sim-ssenariler-qabi {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.sim-ssenari-karti {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.sim-ssenari-karti:hover {
+  background: rgba(30, 41, 59, 0.7);
+  border-color: rgba(139, 92, 246, 0.4);
+}
+.sim-ssenari-karti.aktiv {
+  border-color: #a855f7;
+  background: rgba(168, 85, 247, 0.12);
+}
+.sim-ssenari-basliq {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+.sim-ssenari-badge {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(168, 85, 247, 0.2);
+  color: #d8b4fe;
+}
+
+.sim-netice-karti {
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  border-radius: 10px;
+  padding: 14px;
+}
+.sim-netice-basliq-satir {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.sim-netice-bal-badge {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+.sim-netice-bal-badge.ugurlu {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+.sim-netice-bal-badge.zeif {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+.sim-ders-satiri {
+  background: rgba(255, 255, 255, 0.04);
+  border-left: 3px solid #38bdf8;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  margin-top: 5px;
+  color: #e2e8f0;
+}
+.sim-tarixce-siyahisi {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.sim-tarixce-satiri {
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
+/* Haqq-Hesab & Bildirişlər Düymələri */
+.haqq-hesab-btn {
+  background: rgba(14, 165, 233, 0.15);
+  border: 1px solid rgba(14, 165, 233, 0.4);
+  color: #38bdf8;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+.haqq-hesab-btn:hover {
+  background: rgba(14, 165, 233, 0.28);
+  border-color: rgba(14, 165, 233, 0.7);
+  color: #e0f2fe;
+  transform: translateY(-1px);
+}
+
+.bildiris-zeng-btn {
+  position: relative;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e2e8f0;
+  padding: 4px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  transition: all 0.2s ease;
+}
+.bildiris-zeng-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+.bildiris-saygac {
+  background: #ef4444;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 99px;
+}
+
+/* Planlayıcı & Vergi Təqvimi Zolaqları */
+.sim-planlayici-zolaq {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 8px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.secici-qutu {
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #f1f5f9;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  outline: none;
+}
+.kicik-duyme-xususi {
+  background: rgba(99, 102, 241, 0.2);
+  border: 1px solid rgba(99, 102, 241, 0.45);
+  color: #a5b4fc;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+.kicik-duyme-xususi:hover {
+  background: rgba(99, 102, 241, 0.35);
+  color: #fff;
+}
+.sim-teqvim-qutusu {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #fde68a;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+/* Forma və Haqq-Hesab Çıxarışı */
+.forma-etiket {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #cbd5e1;
+  margin-bottom: 3px;
+  display: block;
+}
+.hh-hesabat-lohvasi {
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 8px;
+  padding: 14px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #f1f5f9;
+}
+.hh-hesabat-lohvasi table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+}
+.hh-hesabat-lohvasi th, .hh-hesabat-lohvasi td {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.hh-hesabat-lohvasi th {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.bildirisler-siyahisi {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bildiris-elementi {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.bildiris-elementi.ugurlu {
+  border-left: 3px solid #10b981;
+}
+.bildiris-elementi.xeberdarliq {
+  border-left: 3px solid #f59e0b;
+}
+.bildiris-elementi.tehlukeli {
+  border-left: 3px solid #ef4444;
+}
+
+/* Özünü-İnkişaf v2.0 (Qaralama, Boz Zona, Düşünmə Qaydaları) */
+.tekamul-bolmeler-qabi {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.tekamul-qutu {
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9px;
+  padding: 10px 12px;
+}
+.tekamul-qutu-basliq {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #e2e8f0;
+  margin-bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.tekamul-siyahi {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 170px;
+  overflow-y: auto;
+}
+.tekamul-element {
+  background: rgba(30, 41, 59, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 7px;
+  padding: 8px 10px;
+  font-size: 11.5px;
+  color: #cbd5e1;
+}
+.tekamul-duymeler {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+.tekamul-btn {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f1f5f9;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.tekamul-btn.tesdiq {
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(16, 185, 129, 0.45);
+  color: #34d399;
+}
+.tekamul-btn.redd {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
 }

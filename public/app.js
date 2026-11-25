@@ -3,6 +3,9 @@
 
 const veziyyet = {
   aktivQovluq: "all",
+  aktivSahe: null,
+  saheler: [],
+  saheMovzulari: [],
   qovluqlar: [],
   menbeler: [],
   istirakcilar: [],
@@ -10,6 +13,13 @@ const veziyyet = {
   sohbetler: [],
   tenzimlemeler: {},
   baglantilar: {},
+  simulyasiyalar: [],
+  simSsenariler: [],
+  secilmisSsenariId: null,
+  simStatistika: { umumi: 0, ugurlu: 0, ortaBal: 0, dersSayi: 0 },
+  schedulerVeziyyet: { tezlik: "gunde_1", son_vaxt: 0, bildirisler: [] },
+  vergiTeqvimi: null,
+  cariHaqqHesabHtml: "",
   seciliMenbeId: null,
   cariMenbeDetali: null,
   yuklemeAbort: null,
@@ -81,6 +91,9 @@ async function apiSorgu(yol, metod = "GET", govde = null, { signal = null, timeo
 async function melumatlariYenile() {
   try {
     const data = await apiSorgu(`/api/bootstrap?qovluq_id=${encodeURIComponent(veziyyet.aktivQovluq)}`);
+    veziyyet.saheler = data.saheler || [];
+    veziyyet.aktivSahe = data.aktiv_sahe || null;
+    veziyyet.saheMovzulari = data.sahe_movzulari || [];
     veziyyet.qovluqlar = data.qovluqlar || [];
     veziyyet.menbeler = data.menbeler || [];
     veziyyet.istirakcilar = data.istirakcilar || [];
@@ -88,8 +101,26 @@ async function melumatlariYenile() {
     veziyyet.sohbetler = data.sohbetler || [];
     veziyyet.tenzimlemeler = data.tenzimlemeler || {};
     veziyyet.baglantilar = data.baglantilar || {};
+    veziyyet.simStatistika = data.simulyasiya_statistika || { umumi: 0, ugurlu: 0, ortaBal: 0, dersSayi: 0 };
+    veziyyet.simSsenariler = data.simulyasiya_ssenariler || [];
+    veziyyet.schedulerVeziyyet = data.scheduler_veziyyet || { tezlik: "gunde_1", son_vaxt: 0, bildirisler: [] };
+    veziyyet.vergiTeqvimi = data.vergi_teqvimi || null;
+    veziyyet.qaralamalar = data.qaralamalar || [];
+    veziyyet.dusunmeQaydalari = data.dusunme_qaydalari || [];
+    veziyyet.mubahiseliDosyeler = data.mubahiseli_dosyeler || [];
+    veziyyet.qanunTesirleri = data.qanun_tesir_hesabatlari || [];
+
+    const gozleyenCem = veziyyet.qaralamalar.length + veziyyet.mubahiseliDosyeler.length;
+    const btnSim = document.getElementById("btnSimulyatorAc");
+    if (btnSim) {
+      btnSim.innerHTML = gozleyenCem > 0
+        ? `🧪 Sınaq Mərkəzi <span class="bildiris-saygac" style="background:#a855f7;">${gozleyenCem}</span>`
+        : `🧪 Sınaq Mərkəzi`;
+    }
 
     statistikaCiz(data.statistika);
+    bildirislerSaygacYenile();
+    kitabxanaCiz();
     qovluqlariCiz();
     menbeleriCiz();
     istirakcilariCiz();
@@ -98,6 +129,537 @@ async function melumatlariYenile() {
     ustPanelDurumYenile();
   } catch (err) {
     bildirisGoster("⚠️ " + err.message);
+  }
+}
+
+function kitabxanaCiz() {
+  const sahe = veziyyet.aktivSahe;
+  const saheAdEl = document.getElementById("aktivSaheAd");
+  const saheIkonEl = document.getElementById("aktivSaheIkon");
+  if (sahe && saheAdEl) {
+    saheAdEl.textContent = sahe.ad;
+    if (saheIkonEl) saheIkonEl.textContent = sahe.ikon || "📚";
+  }
+
+  const kartlarQabi = document.getElementById("sahelerKartlarQabi");
+  if (kartlarQabi) {
+    kartlarQabi.innerHTML = (veziyyet.saheler || []).map(s => {
+      const aktiv = sahe && sahe.id === s.id;
+      const statusBadge = s.esas_mi ? "Əsas Sahə" : (s.valideyn_id ? `Əlaqəli (${s.elaqe_derecesi}%)` : "Müstəqil");
+      return `
+        <div class="sahe-karti ${aktiv ? "aktiv" : ""}" data-sahe-id="${htmlQoru(s.id)}">
+          <div class="sahe-karti-ust">
+            <span class="sahe-karti-ad">${htmlQoru(s.ikon || "📚")} ${htmlQoru(s.ad)}</span>
+            <span class="sahe-karti-badge">${statusBadge}</span>
+          </div>
+          <div class="sahe-karti-aciqlama">${htmlQoru(s.aciqlama || "")}</div>
+          <div class="sahe-karti-stat">📄 ${s.menbe_sayi || 0} mənbə • 💡 ${s.movzu_sayi || 0} mövzu</div>
+        </div>
+      `;
+    }).join("");
+
+    kartlarQabi.querySelectorAll(".sahe-karti").forEach(kart => {
+      kart.addEventListener("click", async () => {
+        const saheId = kart.getAttribute("data-sahe-id");
+        if (!saheId || (sahe && sahe.id === saheId)) return;
+        try {
+          const res = await apiSorgu("/api/saheler/aktiv", "POST", { sahe_id: saheId });
+          veziyyet.aktivSahe = res.aktiv_sahe;
+          veziyyet.saheler = res.saheler;
+          veziyyet.saheMovzulari = res.sahe_movzulari || [];
+          bildirisGoster(`📚 Kitabxana sahəsi: ${res.aktiv_sahe.ad}`);
+          kitabxanaCiz();
+          await melumatlariYenile();
+        } catch (e) {
+          bildirisGoster("⚠️ " + e.message);
+        }
+      });
+    });
+  }
+
+  const movzuQabi = document.getElementById("saheMovzulariSiyahisi");
+  const movzuSayEl = document.getElementById("oyrenilmisMovzuSay");
+  const movzular = veziyyet.saheMovzulari || [];
+  if (movzuSayEl) movzuSayEl.textContent = movzular.length;
+
+  if (movzuQabi) {
+    if (movzular.length === 0) {
+      movzuQabi.innerHTML = `<div style="font-size:12px; color:var(--metn-solgun); padding:8px 0;">Bu sahə üzrə hələ xüsusi norma öyrənilməyib.</div>`;
+    } else {
+      movzuQabi.innerHTML = movzular.map(m => `
+        <div class="movzu-satiri">
+          <div class="movzu-satiri-sol">
+            <span style="font-size:14px;">💡</span>
+            <div>
+              <div class="movzu-satiri-ad">${htmlQoru(m.movzu)}</div>
+              ${m.detal ? `<div class="movzu-satiri-detal">${htmlQoru(m.detal)}</div>` : ""}
+            </div>
+          </div>
+          <span class="movzu-status-badge ${m.status === 'teklif' ? 'teklif' : ''}">${m.status === 'teklif' ? '🔍 Təklif' : '✓ Öyrənilib'}</span>
+        </div>
+      `).join("");
+    }
+  }
+}
+
+async function simulyatorModalAc() {
+  const saheId = veziyyet.aktivSahe ? veziyyet.aktivSahe.id : "vergi_muhasibat";
+  try {
+    const [ssenariRes, tarixceRes, tekamulRes] = await Promise.all([
+      apiSorgu(`/api/simulyator/ssenariler?sahe_id=${encodeURIComponent(saheId)}`),
+      apiSorgu(`/api/simulyator/tarixce?sahe_id=${encodeURIComponent(saheId)}&limit=15`),
+      apiSorgu(`/api/tekamul/veziyyet?sahe_id=${encodeURIComponent(saheId)}`)
+    ]);
+    veziyyet.simSsenariler = ssenariRes.ssenariler || [];
+    veziyyet.simStatistika = ssenariRes.statistika || {};
+    veziyyet.simulyasiyalar = tarixceRes.simulyasiyalar || [];
+    veziyyet.qaralamalar = tekamulRes.qaralamalar || [];
+    veziyyet.arxivYaddaslar = tekamulRes.arxiv_yaddaslar || [];
+    veziyyet.dusunmeQaydalari = tekamulRes.dusunme_qaydalari || [];
+    veziyyet.mubahiseliDosyeler = tekamulRes.mubahiseli_dosyeler || [];
+    veziyyet.qanunTesirleri = tekamulRes.qanun_tesir_hesabatlari || [];
+    if (!veziyyet.secilmisSsenariId && veziyyet.simSsenariler.length > 0) {
+      veziyyet.secilmisSsenariId = veziyyet.simSsenariler[0].id;
+    }
+    simulyatorCiz();
+    document.getElementById("modalSimulyator").hidden = false;
+  } catch (err) {
+    bildirisGoster("⚠️ " + err.message);
+  }
+}
+
+function tekamulPanelleriCiz() {
+  const saheId = veziyyet.aktivSahe ? veziyyet.aktivSahe.id : "vergi_muhasibat";
+
+  // 1) Qaralama Dəftəri
+  const qarQabi = document.getElementById("tekamulQaralamalarQabi");
+  const sayQar = document.getElementById("sayQaralama");
+  const qarList = veziyyet.qaralamalar || [];
+  if (sayQar) sayQar.textContent = qarList.length;
+  if (qarQabi) {
+    if (qarList.length === 0) {
+      qarQabi.innerHTML = `<div style="font-size:11.5px; color:var(--metn-solgun);">Təsdiq gözləyən namizəd qayda yoxdur.</div>`;
+    } else {
+      qarQabi.innerHTML = qarList.map(q => `
+        <div class="tekamul-element">
+          <div>${htmlQoru(q.metn)}</div>
+          <div class="tekamul-duymeler">
+            <button type="button" class="tekamul-btn tesdiq" data-qar-tesdiq="${htmlQoru(q.id)}">👍 Qızıl Yaddaşa Təsdiqlə</button>
+            <button type="button" class="tekamul-btn redd" data-qar-redd="${htmlQoru(q.id)}">🗑️ Rədd Et</button>
+          </div>
+        </div>
+      `).join("");
+      qarQabi.querySelectorAll("[data-qar-tesdiq]").forEach(btn => {
+        btn.onclick = async () => {
+          const res = await apiSorgu("/api/tekamul/qaralama/tesdiq", "POST", { id: btn.getAttribute("data-qar-tesdiq"), sahe_id: saheId });
+          veziyyet.qaralamalar = res.qaralamalar || [];
+          veziyyet.yaddas = res.yaddas || veziyyet.yaddas;
+          tekamulPanelleriCiz();
+          yaddasCiz();
+          bildirisGoster("✅ Qayda Qızıl Yaddaşa təsdiqləndi!");
+        };
+      });
+      qarQabi.querySelectorAll("[data-qar-redd]").forEach(btn => {
+        btn.onclick = async () => {
+          const res = await apiSorgu("/api/tekamul/qaralama/redd", "POST", { id: btn.getAttribute("data-qar-redd"), sahe_id: saheId });
+          veziyyet.qaralamalar = res.qaralamalar || [];
+          tekamulPanelleriCiz();
+          bildirisGoster("🗑️ Namizəd qaralama silindi.");
+        };
+      });
+    }
+  }
+
+  // 2) Boz Zona Dosyeləri
+  const bozQabi = document.getElementById("tekamulBozZonaQabi");
+  const sayBoz = document.getElementById("sayBozZona");
+  const gozleyenBozlar = (veziyyet.mubahiseliDosyeler || []).filter(d => d.status === "gozleyir");
+  if (sayBoz) sayBoz.textContent = gozleyenBozlar.length;
+  if (bozQabi) {
+    if (gozleyenBozlar.length === 0) {
+      bozQabi.innerHTML = `<div style="font-size:11.5px; color:var(--metn-solgun);">Hazırda açıq mübahisəli boz zona dosyesi yoxdur.</div>`;
+    } else {
+      bozQabi.innerHTML = gozleyenBozlar.map(d => `
+        <div class="tekamul-element">
+          <div style="font-weight:700; color:#fde68a; margin-bottom:4px;">⚖️ ${htmlQoru(d.movzu)}</div>
+          <div style="margin-bottom:3px;">👮‍♂️ <strong>Müfəttiş:</strong> ${htmlQoru(d.teref_a_mufettis)}</div>
+          <div>💼 <strong>Baş Mühasib:</strong> ${htmlQoru(d.teref_b_muhasib)}</div>
+          <div class="tekamul-duymeler">
+            <button type="button" class="tekamul-btn" data-boz-id="${htmlQoru(d.id)}" data-movqe="teref_a">👮‍♂️ Müfəttiş Mövqeyini Seç</button>
+            <button type="button" class="tekamul-btn tesdiq" data-boz-id="${htmlQoru(d.id)}" data-movqe="teref_b">💼 Baş Mühasib Mövqeyini Seç</button>
+          </div>
+        </div>
+      `).join("");
+      bozQabi.querySelectorAll("[data-boz-id]").forEach(btn => {
+        btn.onclick = async () => {
+          const res = await apiSorgu("/api/tekamul/boz-zona/qerar", "POST", {
+            id: btn.getAttribute("data-boz-id"),
+            secilmis_movqe: btn.getAttribute("data-movqe"),
+            sahe_id: saheId
+          });
+          veziyyet.mubahiseliDosyeler = res.mubahiseli_dosyeler || [];
+          veziyyet.yaddas = res.yaddas || veziyyet.yaddas;
+          tekamulPanelleriCiz();
+          yaddasCiz();
+          bildirisGoster("⚖️ Ekspertin İş Siyasəti Qızıl Yaddaşa həkk olundu!");
+        };
+      });
+    }
+  }
+
+  // 3) Düşünmə Qaydaları ("Mən niyə səhv etdim?") & Qanun Dəyişikliyi Dövr Arxivi
+  const dusQabi = document.getElementById("tekamulDusunmeQabi");
+  const sayDus = document.getElementById("sayDusunmeQayda");
+  const dusList = veziyyet.dusunmeQaydalari || [];
+  const tesirList = veziyyet.qanunTesirleri || [];
+  if (sayDus) sayDus.textContent = dusList.length;
+  if (dusQabi) {
+    const dusHtml = dusList.map(q => `
+      <div class="tekamul-element">
+        <div style="color:#a5b4fc; font-weight:600;">🧬 Kök-Səbəb: ${htmlQoru(q.sehv_koku)}</div>
+        <div style="margin-top:2px;">✓ <strong>Yoxlama Alqoritmi:</strong> ${htmlQoru(q.yoxlama_qaydasi)}</div>
+      </div>
+    `).join("");
+    const tesirHtml = tesirList.map(t => `
+      <div class="tekamul-element" style="border-left:3px solid #f59e0b;">
+        <div style="color:#fde68a; font-weight:600;">📜 Qanun Yenilənməsi: ${htmlQoru(t.sened_adi)}</div>
+        <div style="margin-top:2px;">${htmlQoru(t.xulase)}</div>
+      </div>
+    `).join("");
+    dusQabi.innerHTML = (tesirHtml + dusHtml) || `<div style="font-size:11.5px; color:var(--metn-solgun);">Hələ əlavə metodoloji qayda yoxdur.</div>`;
+  }
+}
+
+async function dinamikSimulyasiyaIcraEt(dinamikNov = "carpaz_madde") {
+  const saheId = veziyyet.aktivSahe ? veziyyet.aktivSahe.id : "vergi_muhasibat";
+  bildirisGoster(dinamikNov === "canli_cat" ? "💬 Canlı mühasib çatlarından mübahisəli sual sınanılır..." : "🔀 Maddələrin çarpaz kəsişməsindən çətin keys qurulur və həll edilir...");
+  try {
+    const res = await apiSorgu("/api/tekamul/dinamik-sinaq", "POST", { dinamikNov, sahe_id: saheId }, { timeoutMs: 90000 });
+    if (res.ok) {
+      veziyyet.simStatistika = res.statistika || {};
+      veziyyet.qaralamalar = res.qaralamalar || veziyyet.qaralamalar;
+      veziyyet.dusunmeQaydalari = res.dusunme_qaydalari || veziyyet.dusunmeQaydalari;
+      veziyyet.yaddas = res.yaddas || veziyyet.yaddas;
+      const tRes = await apiSorgu(`/api/simulyator/tarixce?sahe_id=${encodeURIComponent(saheId)}&limit=15`);
+      veziyyet.simulyasiyalar = tRes.simulyasiyalar || [];
+      simulyatorCiz();
+      yaddasCiz();
+      bildirisGoster(`✅ Dinamik sınaq tamamlandı: ${res.netice.basliq} (${res.netice.bal}%)`);
+    }
+  } catch (err) {
+    bildirisGoster("⚠️ " + err.message);
+  }
+}
+
+function simulyatorCiz() {
+  tekamulPanelleriCiz();
+  const stat = veziyyet.simStatistika || {};
+  const elUmumi = document.getElementById("statSimUmumi");
+  const elBal = document.getElementById("statSimBal");
+  const elDers = document.getElementById("statSimDersler");
+  if (elUmumi) elUmumi.textContent = stat.umumi || 0;
+  if (elBal) elBal.textContent = (stat.ortaBal || 0) + "%";
+  if (elDers) elDers.textContent = stat.dersSayi || 0;
+
+  const ssenarilerQabi = document.getElementById("simSsenarilerQabi");
+  if (ssenarilerQabi) {
+    ssenarilerQabi.innerHTML = (veziyyet.simSsenariler || []).map(s => {
+      const aktiv = veziyyet.secilmisSsenariId === s.id;
+      return `
+        <div class="sim-ssenari-karti ${aktiv ? "aktiv" : ""}" data-id="${htmlQoru(s.id)}">
+          <div style="flex:1;">
+            <div class="sim-ssenari-basliq">${htmlQoru(s.basliq)}</div>
+            <div style="font-size:11px; color:var(--metn-solgun); margin-top:2px;">${htmlQoru(s.ssenari.slice(0, 110))}...</div>
+          </div>
+          <span class="sim-ssenari-badge">${s.gozlenilenMaddeler?.length ? `Maddə: ${s.gozlenilenMaddeler.join(", ")}` : "Praktika"}</span>
+        </div>
+      `;
+    }).join("");
+
+    ssenarilerQabi.querySelectorAll(".sim-ssenari-karti").forEach(k => {
+      k.addEventListener("click", () => {
+        veziyyet.secilmisSsenariId = k.getAttribute("data-id");
+        simulyatorCiz();
+      });
+    });
+  }
+
+  const teqvimZolagi = document.getElementById("simTeqvimZolagi");
+  const teqvim = veziyyet.vergiTeqvimi;
+  if (teqvimZolagi) {
+    if (teqvim && teqvim.yaxinOlanlar && teqvim.yaxinOlanlar.length > 0) {
+      teqvimZolagi.innerHTML = teqvim.yaxinOlanlar.map(t => `<div style="margin-bottom:4px;">📅 <strong>${htmlQoru(t.ad)}:</strong> ${htmlQoru(t.aciqlama)}</div>`).join("");
+      teqvimZolagi.style.display = "block";
+    } else {
+      teqvimZolagi.style.display = "none";
+    }
+  }
+
+  const selTezlik = document.getElementById("selectSchedulerTezlik");
+  if (selTezlik && veziyyet.schedulerVeziyyet) {
+    selTezlik.value = veziyyet.schedulerVeziyyet.tezlik || "gunde_1";
+    selTezlik.onchange = async () => {
+      try {
+        await apiSorgu("/api/scheduler/tezlik", "POST", { tezlik: selTezlik.value });
+        veziyyet.schedulerVeziyyet.tezlik = selTezlik.value;
+        bildirisGoster("⏱️ Tədqiqat tezliyi yeniləndi: " + selTezlik.options[selTezlik.selectedIndex].text);
+      } catch (e) {
+        bildirisGoster("⚠️ " + e.message);
+      }
+    };
+  }
+
+  const btnIndi = document.getElementById("btnSchedulerIndiIcra");
+  if (btnIndi) {
+    btnIndi.onclick = async () => {
+      btnIndi.disabled = true;
+      bildirisGoster("🚀 Avtonom tədqiqat dövrəsi başladıldı...");
+      try {
+        const res = await apiSorgu("/api/scheduler/icra", "POST", {});
+        if (res.ok) {
+          veziyyet.schedulerVeziyyet.bildirisler = res.bildirisler || [];
+          bildirislerSaygacYenile();
+          bildirisGoster("✅ Avtonom tədqiqat tamamlandı və hesabat hazırlandı!");
+          await melumatlariYenile();
+        }
+      } catch (err) {
+        bildirisGoster("⚠️ " + err.message);
+      } finally {
+        btnIndi.disabled = false;
+      }
+    };
+  }
+
+  const tarixceQabi = document.getElementById("simTarixceSiyahisi");
+  if (tarixceQabi) {
+    const list = veziyyet.simulyasiyalar || [];
+    if (list.length === 0) {
+      tarixceQabi.innerHTML = `<div style="font-size:11.5px; color:var(--metn-solgun); padding:8px 0;">Hələ sınaq keçirilməyib.</div>`;
+    } else {
+      tarixceQabi.innerHTML = list.map(t => {
+        const balKlas = t.bal >= 70 ? "ugurlu" : "zeif";
+        const dersler = Array.isArray(t.dersler) ? t.dersler : [];
+        return `
+          <div class="sim-tarixce-satiri">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-weight:600; color:#f1f5f9;">${htmlQoru(t.basliq)}</span>
+              <span class="sim-netice-bal-badge ${balKlas}">${t.bal}%</span>
+            </div>
+            <div style="font-size:11px; color:var(--metn-solgun); margin:4px 0;">${htmlQoru(t.audit_netice || "")}</div>
+            ${dersler.map(d => `<div class="sim-ders-satiri">💡 ${htmlQoru(d)}</div>`).join("")}
+          </div>
+        `;
+      }).join("");
+    }
+  }
+}
+
+async function simulyasiyaIcraEt() {
+  const ssenariId = veziyyet.secilmisSsenariId;
+  const btnMetn = document.getElementById("btnSimIcraMetn");
+  const btn = document.getElementById("btnSimIcraEt");
+  if (!ssenariId) {
+    bildirisGoster("⚠️ Sınaq keysi seçin.");
+    return;
+  }
+
+  btn.disabled = true;
+  if (btnMetn) btnMetn.textContent = "⏳ Sınaq aparılır...";
+  bildirisGoster("🧪 Sınaq simulyasiyası başlandı...");
+
+  try {
+    const res = await apiSorgu("/api/simulyator/icra", "POST", {
+      ssenariId,
+      sahe_id: veziyyet.aktivSahe ? veziyyet.aktivSahe.id : "vergi_muhasibat"
+    }, { timeoutMs: 90000 });
+
+    if (res.ok) {
+      veziyyet.simStatistika = res.statistika || {};
+      veziyyet.yaddas = res.yaddas || veziyyet.yaddas;
+      veziyyet.saheMovzulari = res.sahe_movzulari || veziyyet.saheMovzulari;
+
+      const qutu = document.getElementById("simCanliNeticeQutusu");
+      const kart = document.getElementById("simNeticeKarti");
+      const net = res.netice;
+      const balKlas = net.bal >= 70 ? "ugurlu" : "zeif";
+      const dersler = Array.isArray(net.dersler) ? net.dersler : [];
+
+      if (kart) {
+        kart.innerHTML = `
+          <div class="sim-netice-basliq-satir">
+            <span style="font-weight:700; font-size:13px; color:#f1f5f9;">🎯 Sınaq Nəticəsi: ${htmlQoru(net.basliq)}</span>
+            <span class="sim-netice-bal-badge ${balKlas}">${net.bal} / 100 Bal (${net.ugurlu_mu ? "Müvəffəq" : "Çatışmazlıq"})</span>
+          </div>
+          <div style="font-size:12px; color:#cbd5e1; margin-bottom:8px; line-height:1.5;">
+            <strong>Auditor Rəyi:</strong> ${htmlQoru(net.audit_netice)}
+          </div>
+          <div style="font-size:11.5px; font-weight:700; text-transform:uppercase; color:#38bdf8; margin-top:8px;">Yaddaşa Yazılmış Dərslər:</div>
+          ${dersler.map(d => `<div class="sim-ders-satiri">🧠 ${htmlQoru(d)}</div>`).join("")}
+        `;
+      }
+      if (qutu) qutu.style.display = "block";
+
+      bildirisGoster(`✅ Sınaq tamamlandı: ${net.bal}% bal!`);
+      const saheId = veziyyet.aktivSahe ? veziyyet.aktivSahe.id : "vergi_muhasibat";
+      const tRes = await apiSorgu(`/api/simulyator/tarixce?sahe_id=${encodeURIComponent(saheId)}&limit=15`);
+      veziyyet.simulyasiyalar = tRes.simulyasiyalar || [];
+      simulyatorCiz();
+      yaddasCiz();
+      kitabxanaCiz();
+    }
+  } catch (err) {
+    bildirisGoster("⚠️ Sınaq xətası: " + err.message);
+  } finally {
+    btn.disabled = false;
+    if (btnMetn) btnMetn.textContent = "Seçilmiş Keysi Sınaqdan Keçir";
+  }
+}
+
+async function simulyatorAvtoTedqiqEt() {
+  const saheId = veziyyet.aktivSahe ? veziyyet.aktivSahe.id : "vergi_muhasibat";
+  bildirisGoster("🔍 Bilik boşluqları araşdırılır...");
+  try {
+    const res = await apiSorgu("/api/simulyator/avto-tedqiqat", "POST", { sahe_id: saheId });
+    if (res.ok) {
+      veziyyet.saheMovzulari = res.movzular || veziyyet.saheMovzulari;
+      const say = res.cevrilmisTeklifler ? res.cevrilmisTeklifler.length : 0;
+      bildirisGoster(`💡 ${say} yeni boşluq tədqiqat təkliflərinə əlavə edildi!`);
+      kitabxanaCiz();
+    }
+  } catch (err) {
+    bildirisGoster("⚠️ " + err.message);
+  }
+}
+
+function bildirislerSaygacYenile() {
+  const saygac = document.getElementById("bildirisSaygac");
+  const bildirisler = veziyyet.schedulerVeziyyet?.bildirisler || [];
+  if (saygac) {
+    if (bildirisler.length > 0) {
+      saygac.textContent = bildirisler.length;
+      saygac.style.display = "inline-block";
+    } else {
+      saygac.style.display = "none";
+    }
+  }
+}
+
+async function modalBildirislerAc() {
+  try {
+    const res = await apiSorgu("/api/scheduler/bildirisler");
+    veziyyet.schedulerVeziyyet.bildirisler = res.bildirisler || [];
+    bildirislerCiz();
+    document.getElementById("modalBildirisler").hidden = false;
+  } catch (err) {
+    bildirisGoster("⚠️ " + err.message);
+  }
+}
+
+function bildirislerCiz() {
+  const qabi = document.getElementById("bildirislerSiyahisi");
+  const list = veziyyet.schedulerVeziyyet?.bildirisler || [];
+  bildirislerSaygacYenile();
+  if (!qabi) return;
+  if (list.length === 0) {
+    qabi.innerHTML = `<div style="font-size:12px; color:var(--metn-solgun); padding:14px 0; text-align:center;">Hələ yeni təqvim və ya avtonom tədqiqat bildirişi yoxdur.</div>`;
+    return;
+  }
+  qabi.innerHTML = list.map(b => {
+    const tarix = new Date(b.vaxt).toLocaleString("az-AZ");
+    return `
+      <div class="bildiris-elementi ${b.seviyye || "info"}">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span style="font-weight:700; color:#f1f5f9; font-size:12.5px;">${htmlQoru(b.basliq)}</span>
+          <span style="font-size:10.5px; color:var(--metn-solgun);">${tarix}</span>
+        </div>
+        <div style="font-size:12px; color:#cbd5e1; margin-top:4px; line-height:1.4; white-space:pre-wrap;">${htmlQoru(b.metn)}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function bildirisleriTemizle() {
+  try {
+    await apiSorgu("/api/scheduler/bildirisler", "DELETE");
+    veziyyet.schedulerVeziyyet.bildirisler = [];
+    bildirislerCiz();
+    bildirisGoster("🗑️ Bildirişlər təmizləndi.");
+  } catch (e) {
+    bildirisGoster("⚠️ " + e.message);
+  }
+}
+
+function modalHaqqHesabAc() {
+  const isdenCixma = document.getElementById("hhIsdenCixma");
+  if (isdenCixma && !isdenCixma.value) {
+    isdenCixma.value = new Date().toISOString().slice(0, 10);
+  }
+  document.getElementById("modalHaqqHesab").hidden = false;
+}
+
+async function haqqHesabHesabla(e) {
+  e.preventDefault();
+  const isciAd = document.getElementById("hhIsciAd").value.trim();
+  const vezife = document.getElementById("hhVezife").value.trim();
+  const maas = Number(document.getElementById("hhMaas").value) || 0;
+  const maasTipi = document.getElementById("hhMaasTipi").value;
+  const sektor = document.getElementById("hhSektor").value;
+  const iseQebulTarixi = document.getElementById("hhIseQebul").value;
+  const isdenCixmaTarixi = document.getElementById("hhIsdenCixma").value;
+  const illikMezuniyyetGun = Number(document.getElementById("hhIllikMezuniyyet").value) || 21;
+  const istifadeEdilmisGun = Number(document.getElementById("hhIstifadeEdilmis").value) || 0;
+  const ayIsGunleri = Number(document.getElementById("hhAyIsGunleri").value) || 22;
+  const islenmisIsGunleri = Number(document.getElementById("hhIslenmisGunler").value) || 22;
+
+  try {
+    const res = await apiSorgu("/api/kalkulyator/haqq-hesab", "POST", {
+      isciAd,
+      vezife,
+      maas,
+      maasTipi,
+      sektor,
+      iseQebulTarixi,
+      isdenCixmaTarixi,
+      illikMezuniyyetGun,
+      istifadeEdilmisGun,
+      ayIsGunleri,
+      islenmisIsGunleri
+    });
+
+    veziyyet.cariHaqqHesabHtml = res.htmlCixarisi || "";
+    const qutu = document.getElementById("hhNeticeQutusu");
+    const icerik = document.getElementById("hhHesabatIcerik");
+
+    if (icerik) {
+      icerik.innerHTML = `
+        <div style="font-weight:700; font-size:14px; margin-bottom:8px; color:#38bdf8;">
+          📑 ${htmlQoru(res.isciAd)} üçün Son Haqq-Hesab Çıxarışı
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:12px; font-size:12px;">
+          <div><strong>Staj Müddəti:</strong> ${res.staj.stajAylari} ay (${res.staj.stajIli} il ${res.staj.stajQaliqAyi} ay)</div>
+          <div><strong>Kompensasiya Günləri:</strong> ${res.staj.qaliqGun} gün (Maddə 144)</div>
+          <div><strong>Cari Ay Maaşı (Gross):</strong> ${res.cariAyGrossMaas} AZN</div>
+          <div><strong>Məzuniyyət Kompensasiyası (Gross):</strong> ${res.kompensasiyaGross} AZN</div>
+        </div>
+        <table style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+          <tr style="background:rgba(255,255,255,0.06);"><th>Təyinat</th><th>Gross</th><th>Tutulmalar</th><th>Net Ödəniş</th></tr>
+          <tr>
+            <td><strong>YEKUN SON HAQQ-HESAB:</strong></td>
+            <td><strong>${res.yekunCemiGross} AZN</strong></td>
+            <td style="color:#f87171;">-${res.tutulma.cemiIsciTutulma} AZN</td>
+            <td style="color:#34d399; font-size:14px; font-weight:bold;">${res.netYekun} AZN</td>
+          </tr>
+        </table>
+        <div style="font-size:11.5px; color:var(--metn-solgun);">
+          • Gəlir vergisi: ${res.tutulma.gelirVergisi} AZN | DSMF: ${res.tutulma.dsmfIsci} AZN | İTS: ${res.tutulma.itsIsci} AZN | İşsizlik: ${res.tutulma.issizlikIsci} AZN<br/>
+          • Şirkətin ümumi xərci: <strong>${res.tutulma.umumiXerc} AZN</strong> (İşəgötürən DSMF/İTS daxil)
+        </div>
+      `;
+    }
+    if (qutu) qutu.style.display = "block";
+    bildirisGoster("✅ Son haqq-hesab hesablandı!");
+  } catch (err) {
+    bildirisGoster("⚠️ Hesablama xətası: " + err.message);
   }
 }
 
@@ -1002,30 +1564,55 @@ async function menbeOnizlemeAc(menbeId, vurgulanacaqParcaId = null) {
   }
 }
 
-// ---- Sağ Panel: Uzunmüddətli Şəxsi Yaddaş ----
+// ---- Sağ Panel: Uzunmüddətli Şəxsi Yaddaş (Qızıl Yaddaş + Qaralama/Boz Zona Keçidi) ----
 function yaddasCiz() {
   const qutu = document.getElementById("yaddasSiyahisi");
+  if (!qutu) return;
+
+  const qarSay = (veziyyet.qaralamalar || []).length;
+  const bozSay = (veziyyet.mubahiseliDosyeler || []).length;
+  const dusSay = (veziyyet.dusunmeQaydalari || []).length;
+
+  const ustZolaq = (qarSay > 0 || bozSay > 0 || dusSay > 0)
+    ? `<div id="btnYaddasdanTekamulAc" style="background:rgba(168,85,247,0.12); border:1px solid rgba(168,85,247,0.35); border-radius:8px; padding:8px 10px; margin-bottom:8px; cursor:pointer; font-size:11.5px; color:#e9d5ff;">
+         🧬 <strong>Özünü-İnkişaf:</strong> ${qarSay} qaralama • ${bozSay} boz zona • ${dusSay} düşünmə qaydası <span style="float:right; color:#c084fc;">Aç →</span>
+       </div>`
+    : "";
+
   if (veziyyet.yaddas.length === 0) {
-    qutu.innerHTML = `
+    qutu.innerHTML = ustZolaq + `
       <div style="text-align:center; padding:20px; color:var(--metn-solgun); font-size:12px;">
         Hələ yaddaş qeydi yoxdur. Yuxarıdan əlavə edə və ya çatda <i>"Yadda saxla ki..."</i> yaza bilərsiniz.
       </div>
     `;
-    return;
+  } else {
+    qutu.innerHTML = ustZolaq + veziyyet.yaddas.map(y => {
+      const etibarEtiket = y.etibar_seviyyesi === "is_siyaseti"
+        ? "⚖️ İş Siyasəti"
+        : y.etibar_seviyyesi === "orijinal_menbe"
+          ? "🟢 Rəsmi Norma"
+          : y.etibar_seviyyesi === "ekspert_tesdiqli"
+            ? "🎯 Ekspert Təsdiqli"
+            : "🧠 Sintez";
+      return `
+        <div class="yaddas-kart">
+          <div class="yaddas-kart-ust">
+            <span>[${htmlQoru(y.kateqoriya)}] • ${etibarEtiket}</span>
+            <div style="display:flex; align-items:center; gap:4px;">
+              <button class="menbe-sil-duyme" data-yad-redakte="${htmlQoru(y.id)}" title="Qaydanı redaktə et" style="color:#38bdf8;">✏️</button>
+              <button class="menbe-sil-duyme" data-yad-sil="${htmlQoru(y.id)}" title="Yaddaşdan sil">✕</button>
+            </div>
+          </div>
+          <div>${htmlQoru(y.metn)}</div>
+        </div>
+      `;
+    }).join("");
   }
 
-  qutu.innerHTML = veziyyet.yaddas.map(y => `
-    <div class="yaddas-kart">
-      <div class="yaddas-kart-ust">
-        <span>[${htmlQoru(y.kateqoriya)}] • ${htmlQoru(y.menbe)}</span>
-        <div style="display:flex; align-items:center; gap:4px;">
-          <button class="menbe-sil-duyme" data-yad-redakte="${htmlQoru(y.id)}" title="Qaydanı redaktə et" style="color:#38bdf8;">✏️</button>
-          <button class="menbe-sil-duyme" data-yad-sil="${htmlQoru(y.id)}" title="Yaddaşdan sil">✕</button>
-        </div>
-      </div>
-      <div>${htmlQoru(y.metn)}</div>
-    </div>
-  `).join("");
+  const kecid = document.getElementById("btnYaddasdanTekamulAc");
+  if (kecid) {
+    kecid.addEventListener("click", () => simulyatorModalAc());
+  }
 
   qutu.querySelectorAll("[data-yad-redakte]").forEach(btn => {
     btn.addEventListener("click", async () => {
@@ -1107,7 +1694,11 @@ async function fayllariYukle(fileList) {
 
       clearInterval(sanTimer);
       progressBar.style.width = `${Math.round(((i + 1) / fayllar.length) * 100)}%`;
-      bildirisGoster(`✅ Əlavə edildi: ${f.name} (${net.menbe?.parcalar?.length || 0} blok)`);
+      if (net.qanun_tesir && net.qanun_tesir.deyisiklikTapildi) {
+        bildirisGoster(`📜 Qanun dəyişikliyi aşkarlandı! ${net.qanun_tesir.arxivlenenSay} əvvəlki qayda dövr arxivi kimi qorundu.`, 5500);
+      } else {
+        bildirisGoster(`✅ Əlavə edildi: ${f.name} (${net.menbe?.parcalar?.length || 0} blok)`);
+      }
       if (net.menbe?.id) {
         veziyyet.seciliMenbeId = net.menbe.id;
       }
@@ -1510,6 +2101,12 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+  document.querySelectorAll(".modal-arka").forEach(m => {
+    m.addEventListener("click", e => {
+      if (e.target === m) m.hidden = true;
+    });
+  });
+
   document.getElementById("btnLinkModal").addEventListener("click", () => {
     const xetaQutu = document.getElementById("linkXetaQutusu");
     if (xetaQutu) {
@@ -1734,4 +2331,142 @@ document.addEventListener("DOMContentLoaded", () => {
     navigator.clipboard.writeText(kod);
     bildirisGoster("📋 Canlı sinxronizasiya kodu kopyalandı!");
   });
+
+  // Kitabxana və Bilik Sahələri Modalı
+  const btnKitabxana = document.getElementById("btnKitabxanaSecici");
+  if (btnKitabxana) {
+    btnKitabxana.addEventListener("click", () => {
+      kitabxanaCiz();
+      document.getElementById("modalKitabxana").hidden = false;
+    });
+  }
+
+  const formYeniSahe = document.getElementById("formYeniSahe");
+  if (formYeniSahe) {
+    formYeniSahe.addEventListener("submit", async e => {
+      e.preventDefault();
+      const ad = document.getElementById("yeniSaheAd").value.trim();
+      const aciqlama = document.getElementById("yeniSaheAciqlama").value.trim();
+      const ikon = document.getElementById("yeniSaheIkon").value.trim() || "📚";
+      if (!ad) return;
+      try {
+        const net = await apiSorgu("/api/saheler", "POST", { ad, aciqlama, ikon });
+        veziyyet.saheler = net.saheler;
+        document.getElementById("yeniSaheAd").value = "";
+        document.getElementById("yeniSaheAciqlama").value = "";
+        bildirisGoster(`✅ Yeni sahə yaradıldı: ${ad}`);
+        kitabxanaCiz();
+      } catch (err) {
+        bildirisGoster("⚠️ " + err.message);
+      }
+    });
+  }
+
+  // Sınaq və Praktiki Təcrübə Simulyatoru Modalı
+  const btnSimulyatorAc = document.getElementById("btnSimulyatorAc");
+  if (btnSimulyatorAc) {
+    btnSimulyatorAc.addEventListener("click", () => {
+      simulyatorModalAc();
+    });
+  }
+
+  const btnSimulyatorBagla = document.getElementById("btnSimulyatorBagla");
+  if (btnSimulyatorBagla) {
+    btnSimulyatorBagla.addEventListener("click", () => {
+      document.getElementById("modalSimulyator").hidden = true;
+    });
+  }
+
+  const btnSimIcraEt = document.getElementById("btnSimIcraEt");
+  if (btnSimIcraEt) {
+    btnSimIcraEt.addEventListener("click", () => {
+      simulyasiyaIcraEt();
+    });
+  }
+
+  const btnSimAvtoTedqiq = document.getElementById("btnSimAvtoTedqiq");
+  if (btnSimAvtoTedqiq) {
+    btnSimAvtoTedqiq.addEventListener("click", () => {
+      simulyatorAvtoTedqiqEt();
+    });
+  }
+
+  const btnSimCarpazMadde = document.getElementById("btnSimCarpazMadde");
+  if (btnSimCarpazMadde) {
+    btnSimCarpazMadde.addEventListener("click", () => {
+      dinamikSimulyasiyaIcraEt("carpaz_madde");
+    });
+  }
+
+  const btnSimCanliCat = document.getElementById("btnSimCanliCat");
+  if (btnSimCanliCat) {
+    btnSimCanliCat.addEventListener("click", () => {
+      dinamikSimulyasiyaIcraEt("canli_cat");
+    });
+  }
+
+  // Haqq-Hesab Modalı Dinləyiciləri
+  const btnHaqqHesabAc = document.getElementById("btnHaqqHesabAc");
+  if (btnHaqqHesabAc) {
+    btnHaqqHesabAc.addEventListener("click", () => {
+      modalHaqqHesabAc();
+    });
+  }
+
+  const btnHaqqHesabBagla = document.getElementById("btnHaqqHesabBagla");
+  if (btnHaqqHesabBagla) {
+    btnHaqqHesabBagla.addEventListener("click", () => {
+      document.getElementById("modalHaqqHesab").hidden = true;
+    });
+  }
+
+  const formHaqqHesab = document.getElementById("formHaqqHesab");
+  if (formHaqqHesab) {
+    formHaqqHesab.addEventListener("submit", haqqHesabHesabla);
+  }
+
+  const btnHhCapEt = document.getElementById("btnHhCapEt");
+  if (btnHhCapEt) {
+    btnHhCapEt.addEventListener("click", () => {
+      if (!veziyyet.cariHaqqHesabHtml) return;
+      const w = window.open("", "_blank");
+      w.document.write(veziyyet.cariHaqqHesabHtml);
+      w.document.close();
+      w.focus();
+      setTimeout(() => w.print(), 300);
+    });
+  }
+
+  const btnHhKopyala = document.getElementById("btnHhKopyala");
+  if (btnHhKopyala) {
+    btnHhKopyala.addEventListener("click", () => {
+      const icerik = document.getElementById("hhHesabatIcerik");
+      if (icerik) {
+        navigator.clipboard.writeText(icerik.innerText);
+        bildirisGoster("📋 Hesabat mətni kopyalandı!");
+      }
+    });
+  }
+
+  // Bildirişlər Modalı Dinləyiciləri
+  const btnBildirislerToggle = document.getElementById("btnBildirislerToggle");
+  if (btnBildirislerToggle) {
+    btnBildirislerToggle.addEventListener("click", () => {
+      modalBildirislerAc();
+    });
+  }
+
+  const btnBildirislerBagla = document.getElementById("btnBildirislerBagla");
+  if (btnBildirislerBagla) {
+    btnBildirislerBagla.addEventListener("click", () => {
+      document.getElementById("modalBildirisler").hidden = true;
+    });
+  }
+
+  const btnBildirisleriTemizle = document.getElementById("btnBildirisleriTemizle");
+  if (btnBildirisleriTemizle) {
+    btnBildirisleriTemizle.addEventListener("click", () => {
+      bildirisleriTemizle();
+    });
+  }
 });
