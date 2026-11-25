@@ -11,6 +11,12 @@ const parsers = require("./src/parsers");
 const connectors = require("./src/connectors");
 const { fayliWorkerIleEmalEt } = require("./src/worker-fayl");
 const geminiFiles = require("./src/gemini-files");
+const domainGuard = require("./src/domain-guard");
+const simulator = require("./src/simulator");
+const scheduler = require("./src/scheduler");
+const payroll = require("./src/payroll");
+const evolution = require("./src/evolution");
+const webResearcher = require("./src/web-researcher");
 
 const PORT = Number(process.env.PORT) || 3847;
 const HOST = process.env.HOST || "0.0.0.0";
@@ -234,13 +240,29 @@ const server = http.createServer(async (req, res) => {
     // 1. Ümumi vəziyyət (Bootstrap)
     if (yol === "/api/bootstrap" && req.method === "GET") {
       const qovluq_id = urlObj.searchParams.get("qovluq_id") || "all";
+      const sahe_id = urlObj.searchParams.get("sahe_id") || db.aktivSaheIdAl();
       return jsonCavab(res, 200, {
         ok: true,
+        saheler: db.saheleriAl(),
+        aktiv_sahe: db.aktivSaheAl(),
+        sahe_movzulari: db.saheMovzulariAl(sahe_id),
+        simulyasiya_statistika: db.simulyasiyaStatistikaAl(sahe_id),
+        simulyasiya_ssenariler: simulator.ssenarileriAl(sahe_id),
+        scheduler_veziyyet: {
+          tezlik: db.tenzimlemeleriAl().scheduler_tezlik || "gunde_1",
+          son_vaxt: Number(db.tenzimlemeleriAl().scheduler_son_vaxt) || 0,
+          bildirisler: scheduler.vebBildirisleriAl()
+        },
+        vergi_teqvimi: scheduler.vergiTeqvimiStatusu(),
+        qaralamalar: db.qaralamaYaddaslariAl(sahe_id),
+        dusunme_qaydalari: db.dusunmeQaydalariniAl(sahe_id),
+        mubahiseli_dosyeler: db.mubahiseliDosyeleriAl(sahe_id, "gozleyir"),
+        qanun_tesir_hesabatlari: db.qanunTesirHesabatlariniAl(sahe_id, 5),
         qovluqlar: db.qovluqlariAl(),
-        menbeler: db.menbeleriAl(qovluq_id),
+        menbeler: db.menbeleriAl(qovluq_id, sahe_id),
         istirakcilar: db.istirakcilariAl(qovluq_id),
-        yaddas: db.yaddaslariAl(),
-        sohbetler: db.sohbetleriAl(qovluq_id),
+        yaddas: db.yaddaslariAl(sahe_id),
+        sohbetler: db.sohbetleriAl(qovluq_id, 60, sahe_id),
         tenzimlemeler: db.tenzimlemeleriAl(),
         statistika: db.statistikaAl(),
         baglantilar: {
@@ -248,6 +270,269 @@ const server = http.createServer(async (req, res) => {
           notebooklm: agent.nlmKorpuVeziyyeti()
         }
       });
+    }
+
+    // 1b. Kitabxana və Bilik Sahələri (Domain Spaces) API-ləri
+    if (yol === "/api/saheler" && req.method === "GET") {
+      return jsonCavab(res, 200, {
+        ok: true,
+        saheler: db.saheleriAl(),
+        aktiv_sahe: db.aktivSaheAl(),
+        movzular: db.saheMovzulariAl(db.aktivSaheIdAl())
+      });
+    }
+
+    if (yol === "/api/saheler" && req.method === "POST") {
+      const b = await govdeOxu(req);
+      if (!b.ad || !b.ad.trim()) return jsonCavab(res, 400, { ok: false, xeta: "Sahə adı boş ola bilməz." });
+      const yeni = db.saheYarat(b);
+      return jsonCavab(res, 200, { ok: true, sahe: yeni, saheler: db.saheleriAl() });
+    }
+
+    if (yol === "/api/saheler/aktiv" && req.method === "POST") {
+      const b = await govdeOxu(req);
+      if (!b.sahe_id) return jsonCavab(res, 400, { ok: false, xeta: "Sahə ID-si tələb olunur." });
+      const deyisdi = db.aktivSaheDeyis(b.sahe_id);
+      return jsonCavab(res, 200, {
+        ok: true,
+        aktiv_sahe: deyisdi,
+        saheler: db.saheleriAl(),
+        sahe_movzulari: db.saheMovzulariAl(b.sahe_id),
+        menbeler: db.menbeleriAl("all", b.sahe_id)
+      });
+    }
+
+    if (yol.startsWith("/api/saheler/") && yol.endsWith("/movzular") && req.method === "GET") {
+      const hisseler = yol.split("/");
+      const saheId = decodeURIComponent(hisseler[3] || "");
+      return jsonCavab(res, 200, { ok: true, movzular: db.saheMovzulariAl(saheId) });
+    }
+
+    if (yol.startsWith("/api/saheler/") && yol.endsWith("/movzular") && req.method === "POST") {
+      const hisseler = yol.split("/");
+      const saheId = decodeURIComponent(hisseler[3] || "");
+      const b = await govdeOxu(req);
+      const yeni = db.saheMovzuElaveEt({ sahe_id: saheId, ...b });
+      return jsonCavab(res, 200, { ok: true, movzu: yeni, movzular: db.saheMovzulariAl(saheId) });
+    }
+
+    // 1c. Sınaq və Praktiki Təcrübə Simulyatoru (Autonomous Simulator & Case-Solver) API-ləri
+    if (yol === "/api/simulyator/ssenariler" && req.method === "GET") {
+      const saheId = urlObj.searchParams.get("sahe_id") || db.aktivSaheIdAl();
+      return jsonCavab(res, 200, {
+        ok: true,
+        ssenariler: simulator.ssenarileriAl(saheId),
+        statistika: db.simulyasiyaStatistikaAl(saheId)
+      });
+    }
+
+    if (yol === "/api/simulyator/tarixce" && req.method === "GET") {
+      const saheId = urlObj.searchParams.get("sahe_id") || null;
+      const limit = Number(urlObj.searchParams.get("limit")) || 30;
+      return jsonCavab(res, 200, {
+        ok: true,
+        simulyasiyalar: db.simulyasiyalariAl(saheId, limit),
+        statistika: db.simulyasiyaStatistikaAl(saheId)
+      });
+    }
+
+    if (yol === "/api/simulyator/icra" && req.method === "POST") {
+      const b = await govdeOxu(req);
+      const saheId = b.sahe_id || db.aktivSaheIdAl();
+      try {
+        const netice = await simulator.simulyasiyaIcraEt({
+          ssenariId: b.ssenariId || null,
+          customSsenari: b.customSsenari || null,
+          saheId
+        });
+        return jsonCavab(res, 200, {
+          ok: true,
+          netice,
+          statistika: db.simulyasiyaStatistikaAl(saheId),
+          yaddas: db.yaddaslariAl(saheId),
+          sahe_movzulari: db.saheMovzulariAl(saheId)
+        });
+      } catch (err) {
+        return jsonCavab(res, 500, { ok: false, xeta: err.message || "Simulyasiya zamanı xəta baş verdi." });
+      }
+    }
+
+    if (yol === "/api/simulyator/avto-tedqiqat" && req.method === "POST") {
+      const b = await govdeOxu(req);
+      const saheId = b.sahe_id || db.aktivSaheIdAl();
+      const netice = simulator.bilikBosluqlariniAvtoTedqiqEt(saheId);
+      return jsonCavab(res, 200, {
+        ok: true,
+        ...netice,
+        movzular: db.saheMovzulariAl(saheId),
+        bosluqlar: db.bilikBosluqlariniAl(20)
+      });
+    }
+
+    // 1d. Planlaşdırılmış Avtonom Tədqiqatçı və Vergi Təqvimi (Scheduler & Tax Calendar)
+    if (yol === "/api/scheduler/veziyyet" && req.method === "GET") {
+      const tenz = db.tenzimlemeleriAl();
+      return jsonCavab(res, 200, {
+        ok: true,
+        tezlik: tenz.scheduler_tezlik || "gunde_1",
+        son_vaxt: Number(tenz.scheduler_son_vaxt) || 0,
+        teqvim: scheduler.vergiTeqvimiStatusu(),
+        bildirisler: scheduler.vebBildirisleriAl()
+      });
+    }
+
+    if (yol === "/api/scheduler/tezlik" && req.method === "POST") {
+      const b = await govdeOxu(req);
+      if (!b.tezlik) return jsonCavab(res, 400, { ok: false, xeta: "Tezlik seçimi tələb olunur." });
+      db.tenzimlemeYenile({ scheduler_tezlik: b.tezlik });
+      return jsonCavab(res, 200, { ok: true, tezlik: b.tezlik });
+    }
+
+    if (yol === "/api/scheduler/icra" && req.method === "POST") {
+      try {
+        const netice = await scheduler.avtoTedqiqatDovresiCalisdir({ mecburidir: true });
+        return jsonCavab(res, 200, {
+          ok: true,
+          netice,
+          bildirisler: scheduler.vebBildirisleriAl(),
+          yaddas: db.yaddaslariAl(db.aktivSaheIdAl())
+        });
+      } catch (err) {
+        return jsonCavab(res, 500, { ok: false, xeta: err.message || "Tədqiqat dövrəsi xətası" });
+      }
+    }
+
+    if (yol === "/api/scheduler/teqvim" && req.method === "GET") {
+      return jsonCavab(res, 200, { ok: true, teqvim: scheduler.vergiTeqvimiStatusu() });
+    }
+
+    if (yol === "/api/scheduler/bildirisler" && req.method === "GET") {
+      return jsonCavab(res, 200, { ok: true, bildirisler: scheduler.vebBildirisleriAl() });
+    }
+
+    if (yol === "/api/scheduler/bildirisler" && req.method === "DELETE") {
+      scheduler.bildirisleriTemizle();
+      return jsonCavab(res, 200, { ok: true, bildirisler: [] });
+    }
+
+    // 1e. Maaş, Məzuniyyət və Son Haqq-Hesab Generatoru
+    if (yol === "/api/kalkulyator/haqq-hesab" && req.method === "POST") {
+      const b = await govdeOxu(req);
+      try {
+        const netice = payroll.sonHaqqHesabHesabatiQur(b);
+        return jsonCavab(res, 200, { ok: true, ...netice });
+      } catch (err) {
+        return jsonCavab(res, 400, { ok: false, xeta: err.message || "Hesablama xətası" });
+      }
+    }
+
+    // 1f. BeyinAI Özünü-İnkişaf və Təkamül Mühərriki (v2.0) API-ləri
+    if (yol === "/api/tekamul/veziyyet" && req.method === "GET") {
+      const saheId = urlObj.searchParams.get("sahe_id") || db.aktivSaheIdAl();
+      return jsonCavab(res, 200, {
+        ok: true,
+        qaralamalar: db.qaralamaYaddaslariAl(saheId),
+        arxiv_yaddaslar: db.arxivYaddaslariAl(saheId),
+        dusunme_qaydalari: db.dusunmeQaydalariniAl(saheId),
+        mubahiseli_dosyeler: db.mubahiseliDosyeleriAl(saheId),
+        qanun_tesir_hesabatlari: db.qanunTesirHesabatlariniAl(saheId, 10)
+      });
+    }
+
+    if (yol === "/api/tekamul/qaralama/tesdiq" && req.method === "POST") {
+      const b = await govdeOxu(req);
+      const saheId = b.sahe_id || db.aktivSaheIdAl();
+      const tesdiq = db.qaralamaTesdiqle(b.id);
+      if (!tesdiq) return jsonCavab(res, 404, { ok: false, xeta: "Qaralama qayda tapılmadı." });
+      return jsonCavab(res, 200, {
+        ok: true,
+        tesdiq,
+        qaralamalar: db.qaralamaYaddaslariAl(saheId),
+        yaddas: db.yaddaslariAl(saheId),
+        statistika: db.statistikaAl()
+      });
+    }
+
+    if (yol === "/api/tekamul/qaralama/redd" && req.method === "POST") {
+      const b = await govdeOxu(req);
+      const saheId = b.sahe_id || db.aktivSaheIdAl();
+      db.qaralamaReddEt(b.id);
+      return jsonCavab(res, 200, {
+        ok: true,
+        qaralamalar: db.qaralamaYaddaslariAl(saheId),
+        statistika: db.statistikaAl()
+      });
+    }
+
+    if (yol === "/api/tekamul/boz-zona/qerar" && req.method === "POST") {
+      const b = await govdeOxu(req);
+      const saheId = b.sahe_id || db.aktivSaheIdAl();
+      const qerar = db.mubahiseliDosyeQerarVer(b.id, {
+        secilmis_movqe: b.secilmis_movqe || "teref_b",
+        ekspert_qerari: b.ekspert_qerari || ""
+      });
+      if (!qerar) return jsonCavab(res, 404, { ok: false, xeta: "Boz zona dosyesi tapılmadı." });
+      return jsonCavab(res, 200, {
+        ok: true,
+        ...qerar,
+        mubahiseli_dosyeler: db.mubahiseliDosyeleriAl(saheId),
+        yaddas: db.yaddaslariAl(saheId),
+        statistika: db.statistikaAl()
+      });
+    }
+
+    if (yol === "/api/tekamul/dusunme-qaydasi/sil" && req.method === "POST") {
+      const b = await govdeOxu(req);
+      const saheId = b.sahe_id || db.aktivSaheIdAl();
+      db.dusunmeQaydasiSil(b.id);
+      return jsonCavab(res, 200, {
+        ok: true,
+        dusunme_qaydalari: db.dusunmeQaydalariniAl(saheId),
+        statistika: db.statistikaAl()
+      });
+    }
+
+    if (yol === "/api/tekamul/dinamik-sinaq" && req.method === "POST") {
+      const b = await govdeOxu(req);
+      const saheId = b.sahe_id || db.aktivSaheIdAl();
+      try {
+        const netice = await simulator.simulyasiyaIcraEt({
+          dinamikNov: b.dinamikNov || "carpaz_madde",
+          saheId
+        });
+        return jsonCavab(res, 200, {
+          ok: true,
+          netice,
+          statistika: db.simulyasiyaStatistikaAl(saheId),
+          qaralamalar: db.qaralamaYaddaslariAl(saheId),
+          dusunme_qaydalari: db.dusunmeQaydalariniAl(saheId),
+          yaddas: db.yaddaslariAl(saheId)
+        });
+      } catch (err) {
+        return jsonCavab(res, 500, { ok: false, xeta: err.message });
+      }
+    }
+
+    if (yol === "/api/tekamul/iyerarxik-arasdir" && req.method === "POST") {
+      const b = await govdeOxu(req);
+      const saheId = b.sahe_id || db.aktivSaheIdAl();
+      try {
+        const netice = await webResearcher.bosluguIyerarxikArasdir({
+          bosluqId: b.bosluqId || null,
+          sual: b.sual || "",
+          movzu: b.movzu || "",
+          sahe_id: saheId
+        });
+        return jsonCavab(res, 200, {
+          ok: true,
+          netice,
+          qaralamalar: db.qaralamaYaddaslariAl(saheId),
+          mubahiseli_dosyeler: db.mubahiseliDosyeleriAl(saheId),
+          bosluqlar: db.bilikBosluqlariniAl(20)
+        });
+      } catch (err) {
+        return jsonCavab(res, 500, { ok: false, xeta: err.message });
+      }
     }
 
     // 2. Qovluqlar (Notebooks)
@@ -267,7 +552,7 @@ const server = http.createServer(async (req, res) => {
     // 3. Fayl Yükləmə (PDF, Word, Excel, ZIP, WhatsApp/Telegram export, Səs, Şəkil)
     if (yol === "/api/menbeler/fayl" && req.method === "POST") {
       const b = await govdeOxu(req);
-      const { qovluq_id = "qovluq-is", faylAdi, mimeType = "", base64Data } = b;
+      const { qovluq_id = "qovluq-is", faylAdi, mimeType = "", base64Data, sahe_id = null } = b;
       if (!faylAdi || !base64Data) {
         return jsonCavab(res, 400, { ok: false, xeta: "Fayl məlumatı tam deyil." });
       }
@@ -275,21 +560,57 @@ const server = http.createServer(async (req, res) => {
       // Ayrı İşçi Axında (Worker Thread) emal et ki, böyük PDF/ZIP faylları serveri heç vaxt dondurmasın
       const { emal, olcu } = await fayliWorkerIleEmalEt({ base64Data, faylAdi, mimeType }, 45000);
 
+      // Sərhəd Qoruyucusu: Sənədin aktiv sahəyə uyğunluğunu yoxla
+      const saheQiymet = domainGuard.saheUygunluguQiymetlendir({
+        metn: emal.xam_metn,
+        basliq: emal.ad || faylAdi,
+        aktivSaheId: sahe_id || db.aktivSaheIdAl()
+      });
+      const teyinOlunanSaheId = sahe_id || saheQiymet.hedefSaheId;
+
       // Əgər çat faylıdırsa və qovluq "all" seçilibsə, avtomatik Çat qovluğuna yönləndir
       const hedefQovluq =
         qovluq_id && qovluq_id !== "all"
           ? qovluq_id
           : (emal.nov === "whatsapp" || emal.nov === "telegram" ? "qovluq-cat" : "qovluq-is");
 
+      const senedBasliq = emal.ad || faylAdi;
+      const evvelkiMenbe = db.db.prepare("SELECT xam_metn FROM menbeler WHERE qovluq_id = ? AND LOWER(ad) = LOWER(?)").get(hedefQovluq, senedBasliq);
+      const kohneMetn = evvelkiMenbe ? evvelkiMenbe.xam_metn : "";
+
       const menbe = db.menbeElaveEt({
         qovluq_id: hedefQovluq,
-        ad: emal.ad || faylAdi,
+        sahe_id: teyinOlunanSaheId,
+        ad: senedBasliq,
         nov: emal.nov,
         olcu,
         xulase: emal.xulase,
-        meta: emal.meta,
+        meta: { ...(emal.meta || {}), sahe_qiymet: saheQiymet },
         xam_metn: emal.xam_metn,
         parcalar: emal.parcalar
+      });
+
+      // Qanun dəyişikliyi olduqda köhnə qaydaları silmədən dövr üzrə arxivlə və Təsir Hesabatı çıxar
+      const qanunTesir = evolution.qanunDeyisikliyiYoxlaVeArxivle({
+        senedAdi: senedBasliq,
+        xamMetn: emal.xam_metn,
+        kohneMetn,
+        sahe_id: teyinOlunanSaheId
+      });
+      if (qanunTesir && qanunTesir.deyisiklikTapildi) {
+        scheduler.bildirisQeydEt({
+          nov: "qanun_deyisikliyi",
+          basliq: `📜 Qanun Dəyişikliyi Təsir Hesabatı: ${senedBasliq}`,
+          metn: qanunTesir.xulase,
+          seviyye: "xeberdarliq"
+        });
+      }
+
+      // Avtonom Öyrənmə: Sənəddən mövzuları çıxar və sahənin öyrənilmiş mövzularına yaz
+      const oyrenilenMovzular = domainGuard.movzuTapVeOyren({
+        metn: emal.xam_metn,
+        basliq: senedBasliq,
+        sahe_id: teyinOlunanSaheId
       });
 
       // Xam faylı data/uploads/ qovluğunda saxla ki, Gemini File API (NotebookLM mühərriki) birbaşa orijinal faylı (PDF/Səs/Şəkil) oxuya bilsin!
@@ -305,6 +626,9 @@ const server = http.createServer(async (req, res) => {
       return jsonCavab(res, 200, {
         ok: true,
         menbe,
+        sahe_qiymet: saheQiymet,
+        qanun_tesir: qanunTesir,
+        oyrenilen_movzular: oyrenilenMovzular,
         qovluqlar: db.qovluqlariAl(),
         statistika: db.statistikaAl()
       });
@@ -313,7 +637,7 @@ const server = http.createServer(async (req, res) => {
     // 4. Veb Link və ya YouTube Əlavə Etmə
     if (yol === "/api/menbeler/link" && req.method === "POST") {
       const b = await govdeOxu(req);
-      const { qovluq_id = "qovluq-sexsi", url } = b;
+      const { qovluq_id = "qovluq-sexsi", url, sahe_id = null } = b;
       if (!url || !url.trim()) {
         return jsonCavab(res, 400, { ok: false, xeta: "Link (URL) daxil edilməyib." });
       }
@@ -321,15 +645,45 @@ const server = http.createServer(async (req, res) => {
       const emal = await parsers.linkOxu(url);
       const hedefQovluq = qovluq_id && qovluq_id !== "all" ? qovluq_id : "qovluq-sexsi";
 
+      const saheQiymet = domainGuard.saheUygunluguQiymetlendir({
+        metn: emal.xam_metn,
+        basliq: emal.ad,
+        aktivSaheId: sahe_id || db.aktivSaheIdAl()
+      });
+      const teyinOlunanSaheId = sahe_id || saheQiymet.hedefSaheId;
+
+      const kohneLinkMenbe = db.db.prepare("SELECT xam_metn FROM menbeler WHERE qovluq_id = ? AND LOWER(ad) = LOWER(?)").get(hedefQovluq, emal.ad);
       const menbe = db.menbeElaveEt({
         qovluq_id: hedefQovluq,
+        sahe_id: teyinOlunanSaheId,
         ad: emal.ad,
         nov: emal.nov,
         olcu: emal.xam_metn.length,
         xulase: emal.xulase,
-        meta: emal.meta,
+        meta: { ...(emal.meta || {}), sahe_qiymet: saheQiymet },
         xam_metn: emal.xam_metn,
         parcalar: emal.parcalar
+      });
+
+      const qanunTesir = evolution.qanunDeyisikliyiYoxlaVeArxivle({
+        senedAdi: emal.ad,
+        xamMetn: emal.xam_metn,
+        kohneMetn: kohneLinkMenbe?.xam_metn || "",
+        sahe_id: teyinOlunanSaheId
+      });
+      if (qanunTesir?.deyisiklikTapildi) {
+        scheduler.bildirisQeydEt({
+          nov: "qanun_deyisikliyi",
+          basliq: `📜 Link Qanun Yenilənməsi: ${emal.ad}`,
+          metn: qanunTesir.xulase,
+          seviyye: "xeberdarliq"
+        });
+      }
+
+      const oyrenilenMovzular = domainGuard.movzuTapVeOyren({
+        metn: emal.xam_metn,
+        basliq: emal.ad,
+        sahe_id: teyinOlunanSaheId
       });
 
       ai.menbeVektorlashdir(menbe).catch(() => {});
@@ -337,6 +691,9 @@ const server = http.createServer(async (req, res) => {
       return jsonCavab(res, 200, {
         ok: true,
         menbe,
+        sahe_qiymet: saheQiymet,
+        qanun_tesir: qanunTesir,
+        oyrenilen_movzular: oyrenilenMovzular,
         qovluqlar: db.qovluqlariAl(),
         statistika: db.statistikaAl()
       });
@@ -345,7 +702,7 @@ const server = http.createServer(async (req, res) => {
     // 5. Mətn / Çat Yapışdırma (Birbaşa kopyalanmış WhatsApp/Telegram mesajları və ya qeyd)
     if (yol === "/api/menbeler/metn" && req.method === "POST") {
       const b = await govdeOxu(req);
-      const { qovluq_id = "qovluq-sexsi", basliq = "Sürətli Qeyd", metn = "" } = b;
+      const { qovluq_id = "qovluq-sexsi", basliq = "Sürətli Qeyd", metn = "", sahe_id = null } = b;
       if (!metn.trim()) {
         return jsonCavab(res, 400, { ok: false, xeta: "Mətn boş ola bilməz." });
       }
@@ -357,15 +714,45 @@ const server = http.createServer(async (req, res) => {
           ? qovluq_id
           : (emal.nov === "whatsapp" ? "qovluq-cat" : (isMuhasibatMetni ? "qovluq-is" : "qovluq-sexsi"));
 
+      const saheQiymet = domainGuard.saheUygunluguQiymetlendir({
+        metn,
+        basliq,
+        aktivSaheId: sahe_id || db.aktivSaheIdAl()
+      });
+      const teyinOlunanSaheId = sahe_id || saheQiymet.hedefSaheId;
+
+      const kohneQeyd = db.db.prepare("SELECT xam_metn FROM menbeler WHERE qovluq_id = ? AND LOWER(ad) = LOWER(?)").get(hedefQovluq, basliq);
       const menbe = db.menbeElaveEt({
         qovluq_id: hedefQovluq,
+        sahe_id: teyinOlunanSaheId,
         ad: basliq,
         nov: emal.nov === "whatsapp" ? "whatsapp" : "qeyd",
         olcu: Buffer.byteLength(metn, "utf8"),
         xulase: emal.xulase,
-        meta: emal.meta,
+        meta: { ...(emal.meta || {}), sahe_qiymet: saheQiymet },
         xam_metn: metn,
         parcalar: emal.parcalar
+      });
+
+      const qanunTesir = evolution.qanunDeyisikliyiYoxlaVeArxivle({
+        senedAdi: basliq,
+        xamMetn: metn,
+        kohneMetn: kohneQeyd?.xam_metn || "",
+        sahe_id: teyinOlunanSaheId
+      });
+      if (qanunTesir?.deyisiklikTapildi) {
+        scheduler.bildirisQeydEt({
+          nov: "qanun_deyisikliyi",
+          basliq: `📜 Qanun Dəyişikliyi Təsir Hesabatı: ${basliq}`,
+          metn: qanunTesir.xulase,
+          seviyye: "xeberdarliq"
+        });
+      }
+
+      const oyrenilenMovzular = domainGuard.movzuTapVeOyren({
+        metn,
+        basliq,
+        sahe_id: teyinOlunanSaheId
       });
 
       ai.menbeVektorlashdir(menbe).catch(() => {});
@@ -373,6 +760,9 @@ const server = http.createServer(async (req, res) => {
       return jsonCavab(res, 200, {
         ok: true,
         menbe,
+        sahe_qiymet: saheQiymet,
+        qanun_tesir: qanunTesir,
+        oyrenilen_movzular: oyrenilenMovzular,
         qovluqlar: db.qovluqlariAl(),
         statistika: db.statistikaAl()
       });
@@ -408,6 +798,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       try {
+        const kohneSinxronMetn = menbe.xam_metn || "";
         const emal = await parsers.linkOxu(url);
         const yenilenmis = db.menbeYenile({
           id,
@@ -420,11 +811,27 @@ const server = http.createServer(async (req, res) => {
           parcalar: emal.parcalar
         });
 
+        const qanunTesir = evolution.qanunDeyisikliyiYoxlaVeArxivle({
+          senedAdi: emal.ad || menbe.ad,
+          xamMetn: emal.xam_metn,
+          kohneMetn: kohneSinxronMetn,
+          sahe_id: menbe.sahe_id || db.aktivSaheIdAl()
+        });
+        if (qanunTesir?.deyisiklikTapildi) {
+          scheduler.bildirisQeydEt({
+            nov: "qanun_deyisikliyi",
+            basliq: `📜 Canlı Linkdə Qanun Dəyişikliyi Aşkarlandı: ${emal.ad || menbe.ad}`,
+            metn: qanunTesir.xulase,
+            seviyye: "tehlukeli"
+          });
+        }
+
         ai.menbeVektorlashdir(yenilenmis).catch(() => {});
 
         return jsonCavab(res, 200, {
           ok: true,
           menbe: yenilenmis,
+          qanun_tesir: qanunTesir,
           mesaj: `Mənbə canlı linkdən uğurla yeniləndi! (${yenilenmis.parcalar?.length || 0} parça/maddə yenidən indeksləndi)`
         });
       } catch (e) {
@@ -486,9 +893,11 @@ const server = http.createServer(async (req, res) => {
         });
       }
 
+      const secilmisSaheId = b.sahe_id || db.aktivSaheIdAl();
       const netice = await agent.agentSualCavabla({
         sual: b.sual.trim(),
         qovluq_id: b.qovluq_id || "all",
+        sahe_id: secilmisSaheId,
         gonderen: b.gonderen || "",
         tarix_baslangic: b.tarix_baslangic || "",
         tarix_son: b.tarix_son || "",
@@ -498,7 +907,11 @@ const server = http.createServer(async (req, res) => {
       return jsonCavab(res, 200, {
         ok: true,
         ...netice,
-        yaddas: db.yaddaslariAl()
+        sahe_id: secilmisSaheId,
+        yaddas: db.yaddaslariAl(secilmisSaheId),
+        qaralamalar: db.qaralamaYaddaslariAl(secilmisSaheId),
+        dusunme_qaydalari: db.dusunmeQaydalariniAl(secilmisSaheId),
+        mubahiseli_dosyeler: db.mubahiseliDosyeleriAl(secilmisSaheId, "gozleyir")
       });
     }
 
@@ -599,9 +1012,19 @@ const server = http.createServer(async (req, res) => {
           gonderen: "Ekspert Əks-Əlaqə",
           nov: "duzelis"
         });
+        let yeniDusunmeQaydasi = null;
+        try {
+          yeniDusunmeQaydasi = await evolution.kokSebebAnaliziEt({
+            sual: sual || "Ekspert Düzəlişi",
+            sehvCavab: cavab || "",
+            duzgunIzah: duzelis.trim()
+          });
+        } catch (_) {}
         return jsonCavab(res, 200, {
           ok: true,
           yaddas: db.yaddaslariAl(),
+          dusunme_qaydalari: db.dusunmeQaydalariniAl(),
+          yeni_dusunme_qaydasi: yeniDusunmeQaydasi,
           qovluqlar: db.qovluqlariAl(),
           statistika: db.statistikaAl(),
           elaveYaddas: yad,
@@ -846,16 +1269,19 @@ function seliqeliDayandir(siqnal) {
 process.on("SIGINT", () => seliqeliDayandir("SIGINT"));
 process.on("SIGTERM", () => seliqeliDayandir("SIGTERM"));
 
-server.listen(PORT, HOST, () => {
-  console.log(`\n======================================================`);
-  console.log(`🧠 BeyinAI v2.9 (Şəxsi AI Asistant & İkinci Beyin) işə düşdü!`);
-  console.log(`🌐 Ünvan: http://localhost:${PORT}`);
-  console.log(`🛡️ Server Qalxanı: Rate-Limit + Təhlükəsiz Başlıqlar + Global Qoruyucu Aktiv`);
-  console.log(`======================================================\n`);
+if (require.main === module) {
+  server.listen(PORT, HOST, () => {
+    console.log(`\n======================================================`);
+    console.log(`🧠 BeyinAI v4.0 (Kitabxana + Özünü-İnkişaf Mühərriki) işə düşdü!`);
+    console.log(`🌐 Ünvan: http://localhost:${PORT}`);
+    console.log(`🛡️ Server Qalxanı: Rate-Limit + Təhlükəsiz Başlıqlar + Global Qoruyucu Aktiv`);
+    console.log(`======================================================\n`);
 
-  // Əgər Telegram Bot Token bazada varsa, avtomatik başlat
-  const tenz = db.tenzimlemeleriAl();
-  if (tenz.tg_bot_token) {
-    connectors.tgBaslat().catch(() => {});
-  }
-});
+    const tenz = db.tenzimlemeleriAl();
+    if (tenz.tg_bot_token) {
+      connectors.tgBaslat().catch(() => {});
+    }
+  });
+}
+
+module.exports = { server };
