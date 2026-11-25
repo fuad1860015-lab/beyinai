@@ -126,8 +126,12 @@ const DOMEN_SINONIMLERI = [
     elave: "Maddə 122 123 124 125 ödəmə mənbəyində vergi dividend 5 faiz icarə 14 faiz qeyri-rezident 10 faiz"
   },
   {
-    acar: /muzdlu|maaş|əməkhaqqı|sosial\s*sığorta|\bmdss\b|\bits\b|8000\s*manat|(?:əmək\s*müqavilə.*(?:olmadan|cərimə))/i,
-    elave: "Maddə 101.1 101.1-1 102 58.10 muzdlu iş 8000 manat sosial sığorta MDSS İTS 2000 manat cərimə"
+    acar: /maddi\s*yard[ıi]m|ezamiyyə|ezamiyye|kompensasiya|müavinət|muavinet|hədiyyə|hediyye|sosial\s*sığorta\s*haqqı\s*hesablan|dsmf\s*tutul/i,
+    elave: "Maddə 15 Məcburi dövlət sosial sığorta haqqı hesablanan gəlir növləri sığortaedənin öz işçisinə ödədiyi maddi yardım istisna olmaqla Maddə 102.1.3 102.1.7 102.1.14 gəlir vergisindən azadolma"
+  },
+  {
+    acar: /muzdlu|maaş|əməkhaqqı|sosial\s*sığorta|\bmdss\b|\bits\b|\bdsmf\b|8000\s*manat|(?:əmək\s*müqavilə.*(?:olmadan|cərimə))/i,
+    elave: "Maddə 101.1 101.1-1 102 58.10 Maddə 14 Maddə 15 muzdlu iş 8000 manat sosial sığorta MDSS DSMF İTS 2000 manat cərimə"
   },
   {
     acar: /kameral|səyyar|seyyar|vergi\s*yoxlama|uyğunsuzluq|iddia\s*müddəti/i,
@@ -817,7 +821,8 @@ SƏNİN ROLUN VƏ DƏRİN ANALİTİK METODOLOGİYAN:
    #### 🚨 3. Maliyyə Sanksiyası, Cərimə və Risklər:
    - Qaydaya əməl edilmədikdə tətbiq olunan maliyyə sanksiyasını, cərimə faizlərini və vergi yoxlaması risklərini dəqiq maddə ilə göstər.
    #### 💡 4. Proaktiv Ekspert Təklifi və Strateji Addım:
-   - İstifadəçinin soruşmadığı, lakin biznes və vergi baxımından kritik olan gizli fürsət, optimizasiya və ya təhlükəsizlik addımını təklif et (məsələn: "Bunu filan maddə ilə sənədləşdirsəniz vergidən azad olar", "Əmək müqaviləsinə filan bəndi əlavə edin ki, cərimə riski sıfırlansın").
+   - İstifadəçinin soruşmadığı, lakin biznes və vergi baxımından kritik olan **YALNIZ 100% QANUNİ** optimizasiya, sənədləşmə və ya cərimədən qorunma addımını təklif et (məsələn: qanuni azadolma şərtləri, müqavilə bəndi, portalda düzgün bəyanetmə). **QƏTİ QADAĞA:** Heç vaxt geri tarixlə sənəd/müqavilə dəyişdirməyi, ödənişi süni şəkildə aylara bölməyi və ya vergidən/cərimədən qanunsuz yayınma yollarını təklif etmə!
+   - **DİL TƏMİZLİYİ:** Yalnız saf və ədəbi Azərbaycan dilində yaz — türkcə sözlər ("yoksa", "fakat", "ancak", "çünkü", "göre" və s.) qətiyyən istifadə etmə!
    </DETALLI_ANALIZ>
 
    HİSSƏ 3 (Mövzunu dərinləşdirən 2-3 ağıllı növbəti sual — <NOVBETI_SUALLAR> teqləri daxilində):

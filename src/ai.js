@@ -7,19 +7,19 @@
 const db = require("./db");
 const geminiFiles = require("./gemini-files");
 
-// Aktiv və dərin düşünmə qabiliyyətli Gemini modelləri siyahısı
+// Aktiv və dərin düşünmə qabiliyyətli Gemini modelləri siyahısı (zəif lite modelə düşməzdən əvvəl güclü gemini-flash-latest yoxlanır!)
 const GEMINI_DERIN_MODELLER = [
   "gemini-3-flash-preview",
-  "gemini-3.1-flash-lite-preview",
   "gemini-flash-latest",
+  "gemini-3.1-flash-lite-preview",
   "gemini-flash-lite-latest"
 ];
 
 const GEMINI_SURETLI_MODELLER = [
-  "gemini-3.1-flash-lite-preview",
   "gemini-3-flash-preview",
-  "gemini-flash-lite-latest",
-  "gemini-flash-latest"
+  "gemini-flash-latest",
+  "gemini-3.1-flash-lite-preview",
+  "gemini-flash-lite-latest"
 ];
 
 function geminiModelSiyahisiAl(secilmishModel, derinRejim = true) {
