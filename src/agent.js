@@ -8,6 +8,7 @@
 const db = require("./db");
 const ai = require("./ai");
 const geminiFiles = require("./gemini-files");
+const evolution = require("./evolution");
 
 // Canlı NotebookLM Brauzer Körpüsü növbəsi (Extension qoşulduqda sualları canlı olaraq notebooklm.google.com-a da yönləndirə bilir)
 const nlmSorguNovbesi = [];
@@ -236,6 +237,7 @@ async function agentDerinAxtarisEt({
   sorgular,
   sorguObyektleri = null,
   qovluq_id = "all",
+  sahe_id = null,
   gonderen = "",
   tarix_baslangic = "",
   tarix_son = "",
@@ -266,6 +268,7 @@ async function agentDerinAxtarisEt({
       sorgu: s,
       sorguVektoru: i === 0 ? esasSorguVektoru : null,
       qovluq_id,
+      sahe_id,
       gonderen,
       tarix_baslangic,
       tarix_son,
@@ -585,25 +588,39 @@ ${ilkinCavab.slice(0, 2200)}`;
 async function agentSualCavabla({
   sual,
   qovluq_id = "all",
+  sahe_id = null,
   gonderen = "",
   tarix_baslangic = "",
   tarix_son = "",
   menbe_nov = "",
   derin_rejim = null,
+  konsilium_rejim = null,
   yenidenArasdir = false,
   evvelkiCavab = ""
 }) {
   const baslangicVaxt = Date.now();
   const tenz = db.tenzimlemeleriAl();
+  const secilmisSaheId = sahe_id || db.aktivSaheIdAl();
   const aktivDerinRejim = yenidenArasdir ? true : (derin_rejim !== null ? Boolean(derin_rejim) : (tenz.derin_rejim !== "0"));
+  const aktivKonsilium = konsilium_rejim !== null ? Boolean(konsilium_rejim) : (tenz.konsilium_rejim === "1" || sual.length >= 35);
   const dusunmeAddimlari = [];
   if (yenidenArasdir) {
     dusunmeAddimlari.push(`🔄 Yenidən Dərin Araşdırma Rejimi: İstifadəçi əvvəlki cavabı bəyənmədi, sual sıfırdan və fərqli bucaqdan təkrar araşdırılır.`);
   }
 
+  if (aktivKonsilium) {
+    dusunmeAddimlari.push(`⚖️ Çox-Baxışlı Konsilium Debatı Aktivdir: Mühafizəkar Vergi Müfəttişi vs Təcrübəli Baş Mühasib arqumentləri çarpazlaşdırılır.`);
+  }
+
+  const cariSahe = db.aktivSaheAl();
+  if (cariSahe) {
+    dusunmeAddimlari.push(`📚 Kitabxana Rəfi: **${cariSahe.ad}** (${cariSahe.esas_mi ? "Əsas İstiqamət" : "Əlaqəli Sahə"}) üzrə axtarış və sintez aparılır.`);
+  }
+
   // 1) Birbaşa yaddaş əmri və ya İstifadəçi Ekspert Düzəlişi (Active Learning Loop) varmı?
-  const tarixce = db.sohbetleriAl(qovluq_id, 6);
+  const tarixce = db.sohbetleriAl(qovluq_id, 6, secilmisSaheId);
   const sonIstifadeciSuali = [...tarixce].reverse().find(m => m.rol === "user")?.metn || "";
+  const sonAsistantCavabi = [...tarixce].reverse().find(m => m.rol === "assistant")?.metn || "";
 
   const yaddasEmri = sual.match(/^(?:yadda saxla ki|unutma ki|qeyd et ki|yadda saxla\s*[:-])\s*(.+)/i);
   const duzelisEmri = !yaddasEmri && sual.length > 25 && /(?:düzgün təhlil etmədin|bəyənmədim|səhvdir|yanlışdır|əslində belədir|şərti belədi|qaydası belədir|qəbul edilir|belə hesablanmır|orada səhv|düzgün deyil|elə deyil)/i.test(sual);
@@ -614,6 +631,7 @@ async function agentSualCavabla({
       kateqoriya: "qayda",
       metn: `QIZIL QAYDA: ${temizQayda}`,
       menbe: "Birbaşa Təlimat",
+      sahe_id: secilmisSaheId,
       vaciblik: 5
     });
     if (typeof db.praktikaKeysElaveEt === "function") {
@@ -635,6 +653,7 @@ async function agentSualCavabla({
       kateqoriya: "qayda",
       metn: tamQizilQayda,
       menbe: "Ekspert Əks-Əlaqə",
+      sahe_id: secilmisSaheId,
       vaciblik: 5
     });
     if (typeof db.praktikaKeysElaveEt === "function") {
@@ -646,10 +665,22 @@ async function agentSualCavabla({
         nov: "duzelis"
       });
     }
+    // "Mən niyə səhv etdim?" — Kök-Səbəb Təhlili və Yeni Metodoloji Yoxlama Qaydası
+    try {
+      const yeniMetaQayda = await evolution.kokSebebAnaliziEt({
+        sual: sonIstifadeciSuali || sual,
+        sehvCavab: sonAsistantCavabi,
+        duzgunIzah: sual,
+        sahe_id: secilmisSaheId
+      });
+      if (yeniMetaQayda) {
+        dusunmeAddimlari.push(`🧬 Kök-Səbəb Təhlili ("Mən niyə səhv etdim?"): *${yeniMetaQayda.sehv_koku}* → Düşünmə alqoritminə yeni yoxlama qaydası əlavə edildi!`);
+      }
+    } catch (_) {}
     dusunmeAddimlari.push(`📌 İstifadəçinin ekspert düzəlişi əvvəlki sualın konteksti ilə birləşdirilərək "Qızıl Qayda" və "Praktiki Keys" kimi yaddaşa yazıldı.`);
   }
 
-  const aktivMenbeler = db.menbeleriAl(qovluq_id).filter(m => m.aktiv === 1);
+  const aktivMenbeler = db.menbeleriAl(qovluq_id, secilmisSaheId).filter(m => m.aktiv === 1);
   dusunmeAddimlari.push(`🗂️ Aktiv Baza yoxlanıldı: **${aktivMenbeler.length}** mənbə (${aktivMenbeler.map(m => m.ad).slice(0, 5).join(", ") || "boşdur"}).`);
 
   // 2) Paralel İcra (Promise.all): Axtarış Planı + Semantik Sual Vektoru eyni anda hesablanır (sürət 2x artır!)
@@ -672,6 +703,7 @@ async function agentSualCavabla({
     sorgular: plan.sorgular,
     sorguObyektleri: plan.sorguObyektleri,
     qovluq_id,
+    sahe_id: secilmisSaheId,
     gonderen,
     tarix_baslangic,
     tarix_son,
@@ -754,8 +786,8 @@ async function agentSualCavabla({
 
   // Suala ən uyğun (mövzu və maddə üzrə) Uzunmüddətli Yaddaş və Qızıl Qaydaları seç
   const { siyahi: sexsiYaddas, uygunQizilQaydalar } = typeof db.aktualYaddaslariAl === "function"
-    ? db.aktualYaddaslariAl(plan.effektifSual || sual, 15)
-    : { siyahi: db.yaddaslariAl().slice(0, 15), uygunQizilQaydalar: [] };
+    ? db.aktualYaddaslariAl(plan.effektifSual || sual, 15, secilmisSaheId)
+    : { siyahi: db.yaddaslariAl(secilmisSaheId).slice(0, 15), uygunQizilQaydalar: [] };
 
   if (uygunQizilQaydalar.length > 0) {
     dusunmeAddimlari.push(`🎯 Mövzuya uyğun **${uygunQizilQaydalar.length} öyrədilmiş Qızıl Qayda** aktivləşdirildi.`);
@@ -780,6 +812,27 @@ async function agentSualCavabla({
       dusunmeAddimlari.push(`⚖️ Ziddiyyət Detektoru: Rəsmi Məcəllə / Qızıl Qayda ilə köhnə qeyd arasındakı fərq aşkarlandı və rəsmi norma üstün götürüldü.`);
     }
   }
+
+  // Qanunda birbaşa rəsmi maddə yoxdursa, lakin bir neçə fərqli praktiki müzakirə varsa, Boz Zona Dosyesi yoxla
+  if (resmiBloklar.length === 0 && qeyriResmiBloklar.length >= 2 && uygunQizilQaydalar.length === 0) {
+    try {
+      const bozDosye = evolution.bozZonaYoxlaVeDosyeAc({ sual, sitatlar, sahe_id: secilmisSaheId });
+      if (bozDosye) {
+        dusunmeAddimlari.push(`⚖️ Boz Zona Aşkarlandı: Qanunda birbaşa norma tapılmadığı üçün **"${bozDosye.movzu}"** üzrə Mübahisəli Məsələ Dosyesi açıldı (Ekspertin İş Siyasəti qərarı gözlənilir).`);
+      }
+    } catch (_) {}
+  }
+
+  // "Mən niyə səhv etdim?" bazasından aktiv metodoloji düşünmə qaydalarını gətir
+  const aktivDusunmeQaydalari = typeof db.dusunmeQaydalariniAl === "function"
+    ? db.dusunmeQaydalariniAl(secilmisSaheId).slice(0, 8)
+    : [];
+  if (aktivDusunmeQaydalari.length > 0) {
+    dusunmeAddimlari.push(`🧬 Özünü-Yoxlama Alqoritmi: Əvvəlki səhvlərdən öyrənilmiş **${aktivDusunmeQaydalari.length} metodoloji yoxlama qaydası** tətbiq olunur.`);
+  }
+  const dusunmeQaydalariBloku = aktivDusunmeQaydalari.length > 0
+    ? `\n\nÖZÜNÜ-YOXLAMA ALQORİTMİ (ƏVVƏLKİ SƏHVLƏRDƏN ÖYRƏNİLMİŞ MƏCBURİ METODOLOJİ ADDIMLAR):\n${aktivDusunmeQaydalari.map((q, idx) => `${idx + 1}. [${q.tetbiq_serti || "Ümumi"}] ${q.yoxlama_qaydasi}`).join("\n")}`
+    : "";
 
   const qanunPraktikaTelimati = qanunVePraktikaVar
     ? `\n\n7. **⚖️ QANUN VS PRAKTİKA ZİDDİYYƏT AŞKARLAYICISI (MÜTLƏQ İCRA ET!):**\n   Bazada HƏM rəsmi qanun maddəsi, HƏM DƏ mühasib qruplarından gələn canlı praktiki təcrübə tapılıb. Onları çarpaz müqayisə et! Əgər qanunun hərfi mətni ilə praktikada müfəttişlərin / portalın davranışı arasında fərq və ya risk varsa, cavabında mütləq bu 3 bəndi açıq göstər:\n   - **⚖️ Qanun nə deyir:** [rəsmi maddə]\n   - **💼 Praktikada nə baş verir:** [qruplardan / portaldan real yanaşma]\n   - **🎯 Ən təhlükəsiz qərar:** [risksiz, cəriməsiz çıxış yolu]`
@@ -825,6 +878,10 @@ SƏNİN ROLUN VƏ DƏRİN ANALİTİK METODOLOGİYAN:
    - Qaydaya əməl edilmədikdə tətbiq olunan maliyyə sanksiyasını, cərimə faizlərini və vergi yoxlaması risklərini dəqiq maddə ilə göstər.
    #### 💡 4. Proaktiv Ekspert Təklifi və Strateji Addım:
    - İstifadəçinin soruşmadığı, lakin biznes və vergi baxımından kritik olan **YALNIZ 100% QANUNİ** optimizasiya, sənədləşmə və ya cərimədən qorunma addımını təklif et (məsələn: qanuni azadolma şərtləri, müqavilə bəndi, portalda düzgün bəyanetmə). **QƏTİ QADAĞA:** Heç vaxt geri tarixlə sənəd/müqavilə dəyişdirməyi, ödənişi süni şəkildə aylara bölməyi və ya vergidən/cərimədən qanunsuz yayınma yollarını təklif etmə!
+   #### ⚖️ 5. Çox-Baxışlı Ekspert Konsiliumu (Müfəttiş vs Baş Mühasib Debatı):
+   - 👮‍♂️ **Mühafizəkar Vergi Müfəttişi Yanaşması:** [Audit riski, qanunun ən sərt mətni, kameral yoxlama və cərimə sanksiyası riski].
+   - 💼 **Təcrübəli Baş Mühasib Yanaşması:** [Qanuni müdafiə, optimizasiya, xərcin əsaslandırılması, portal və məhkəmə təcrübəsi].
+   - 🎯 **Balanslaşdırılmış Qızıl Qərar:** [Cərimədən qoruyan və biznesi riskə atmayan ən doğru çıxış yolu].
    - **DİL TƏMİZLİYİ:** Yalnız saf və ədəbi Azərbaycan dilində yaz — türkcə sözlər ("yoksa", "fakat", "ancak", "çünkü", "göre" və s.) qətiyyən istifadə etmə!
    </DETALLI_ANALIZ>
 
@@ -843,7 +900,7 @@ SƏNİN ROLUN VƏ DƏRİN ANALİTİK METODOLOGİYAN:
 <YADDAŞ kateqoriya="fakt|qayda|tapşırıq|şəxs">Qısa fərdi fakt</YADDAŞ>${qanunPraktikaTelimati}
 
 UZUNMÜDDƏTLİ ŞƏXSİ YADDAŞ (Köməkçi kontekst — YALNIZ istifadəçinin sualının əsas mövzusuna 100% uyğun olduqda istifadə et; əlaqəsiz yaddaş qeydlərini qətiyyən cavaba qatma!):
-${yaddasKonteksti}`;
+${yaddasKonteksti}${dusunmeQaydalariBloku}`;
 
   const yenidenBloku = yenidenArasdir
     ? `\n\n⚠️ YENİDƏN DƏRİN ARAŞDIRMA TAPŞIRIĞI:\nİstifadəçi əvvəlki cavabı bəyənmədi və yenidən araşdırmağını istədi!\n${evvelkiCavab ? `ƏVVƏLKİ BƏYƏNİLMƏYƏN CAVAB (bunu təkrarlama, daha dərin və dəqiq araşdır):\n${String(evvelkiCavab).replace(/<[^>]+>/g, "").slice(0, 700)}\n` : ""}Zəhmət olmasa sualı sıfırdan oxu, qaçırdığın detalları, istisnaları, tarixləri və rəsmi maddələri yenidən yoxla və tam fərqli, daha yetkin ekspert cavabı ver!`
@@ -954,14 +1011,28 @@ ${sual}${yenidenBloku}`;
       : "🔴 Bazada Rəsmi Mənbə Yoxdur";
 
   if (bilikBoslugu) {
+    let qeydBosluq = null;
     if (typeof db.bilikBosluguQeydEt === "function") {
-      db.bilikBosluguQeydEt({
+      qeydBosluq = db.bilikBosluguQeydEt({
         sual,
         movzu: sual.slice(0, 70),
         menbe: qovluq_id === "all" ? "Mərkəzi Beyin" : qovluq_id
       });
     }
-    dusunmeAddimlari.push(`📌 Bilik Boşluğu Qeydə Alındı: Bazada bu mövzu üzrə rəsmi mənbə zəifdir — /bosluqlar siyahısına əlavə edildi.`);
+    dusunmeAddimlari.push(`📌 Bilik Boşluğu Qeydə Alındı: Bazada rəsmi mənbə zəifdir — arxa planda İyerarxik Araşdırma (Rəsmi Portallar → Ekspert Şərhləri) başladıldı.`);
+
+    // Söhbəti gecikdirmədən arxa planda İyerarxik Araşdırmanı işə sal (simulyasiya sorğusu deyilsə)
+    if (!/^SINAQ SİMULYASİYASI:/i.test(sual)) {
+      try {
+        const webResearcher = require("./web-researcher");
+        webResearcher.bosluguIyerarxikArasdir({
+          bosluqId: qeydBosluq?.id || null,
+          sual,
+          movzu: sual.slice(0, 70),
+          sahe_id: secilmisSaheId
+        }).catch(() => {});
+      } catch (_) {}
+    }
   }
 
   const muddetSan = ((Date.now() - baslangicVaxt) / 1000).toFixed(1);
@@ -976,6 +1047,7 @@ ${sual}${yenidenBloku}`;
           kateqoriya: kat || "fakt",
           metn: m.trim(),
           menbe: "Agent Analizi",
+          sahe_id: secilmisSaheId,
           vaciblik: 4
         });
         if (elave) yeniYaddaslar.push(elave);
@@ -993,9 +1065,10 @@ ${sual}${yenidenBloku}`;
     } catch (_) {}
   }
 
-  db.sohbetElaveEt({ qovluq_id, rol: "user", metn: sual, sitatlar: [] });
+  db.sohbetElaveEt({ qovluq_id, sahe_id: secilmisSaheId, rol: "user", metn: sual, sitatlar: [] });
   const saxlanilanCavab = db.sohbetElaveEt({
     qovluq_id,
+    sahe_id: secilmisSaheId,
     rol: "assistant",
     metn: temizCavab,
     // dusunmeAddimlari-ni yalnız 1-ci sitat obyektində saxla ki, baza 12x şişməsin

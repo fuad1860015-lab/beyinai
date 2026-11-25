@@ -435,6 +435,32 @@ async function tgUpdateEmalEt(token, update) {
       } else if (cbChatId) {
         await tgMesajGonder(token, cbChatId, "ℹ️ Bu sualın müddəti bitib — zəhmət olmasa sualı yenidən yazın.");
       }
+    } else if (data.startsWith("qar_ok_")) {
+      const yadId = data.replace("qar_ok_", "");
+      const tesdiq = db.qaralamaTesdiqle(yadId);
+      if (tesdiq && cbChatId) {
+        await tgMesajGonder(token, cbChatId, `✅ <b>Qaralama Qızıl Yaddaşa Təsdiqləndi!</b>\nArtıq əsas qayda kimi tətbiq ediləcək:\n<i>${tesdiq.metn.slice(0, 260)}</i>`);
+      }
+    } else if (data.startsWith("qar_no_")) {
+      const yadId = data.replace("qar_no_", "");
+      db.qaralamaReddEt(yadId);
+      if (cbChatId) {
+        await tgMesajGonder(token, cbChatId, "🗑️ Namizəd qaralama qayda rədd edildi və silindi.");
+      }
+    } else if (data.startsWith("boz_a_") || data.startsWith("boz_b_")) {
+      const movqe = data.startsWith("boz_a_") ? "teref_a" : "teref_b";
+      const dosyeId = data.replace(/^boz_[ab]_/, "");
+      const qerar = db.mubahiseliDosyeQerarVer(dosyeId, { secilmis_movqe: movqe });
+      if (qerar && cbChatId) {
+        const etiket = movqe === "teref_a" ? "👮‍♂️ Mühafizəkar Müfəttiş Mövqeyi" : "💼 Praktiki Baş Mühasib Mövqeyi";
+        await tgMesajGonder(token, cbChatId, `⚖️ <b>Ekspertin İş Siyasəti Yadda Saxlanıldı!</b>\nSeçilmiş mövqe: <b>${etiket}</b>\nMövzu: <i>${qerar.dosye.movzu}</i>`);
+      }
+    } else if (data.startsWith("sahe_sec_")) {
+      const saheId = data.replace("sahe_sec_", "");
+      const yeni = db.aktivSaheDeyis(saheId);
+      if (yeni && cbChatId) {
+        await tgMesajGonder(token, cbChatId, `📚 <b>Aktiv Kitabxana Sahəsi Dəyişdirildi:</b> ${yeni.ikon || "📚"} <b>${yeni.ad}</b>`);
+      }
     }
     return;
   }
@@ -443,6 +469,11 @@ async function tgUpdateEmalEt(token, update) {
   if (!msg) return;
 
   const chatId = msg.chat.id;
+  tgVeziyyet.sonChatId = chatId;
+  try {
+    db.tenzimlemeYenile({ tg_son_chat_id: String(chatId) });
+  } catch (_) {}
+
   const tenz = db.tenzimlemeleriAl();
   const qovluq_id = tenz.tg_avto_qovluq || "qovluq-cat";
 
@@ -472,20 +503,104 @@ async function tgUpdateEmalEt(token, update) {
     await tgMesajGonder(
       token,
       chatId,
-      "🧠 Salam! Mən sizin Şəxsi AI Agentiniz və Mühasibatlıq Köməkçinizəm.\n\n" +
+      "🧠 Salam! Mən sizin Şəxsi AI Agentiniz və Mühasibatlıq Köməkçinizəm (v4.0 — Özünü-İnkişaf Mühərriki).\n\n" +
       "Mənə istənilən mövzuda (Vergi, Əmək, Mühasibatlıq, Sənədlər) sual verə, səsli mesaj ata və ya PDF/Word sənədləri göndərə bilərsiniz.\n\n" +
       "📌 <b>Xüsusi İmkanlar və Komandalar:</b>\n" +
-      "• 🧮 <b>Kalkulyator:</b> <code>hesabla maaş 1500 net</code> və ya <code>hesabla məzuniyyət 1200 maaş 21 gün</code>\n" +
+      "• 📚 <b>Kitabxana Sahələri:</b> <code>/saheler</code> — Aktiv sahəni seçmək və təcrid etmək\n" +
+      "• 🧬 <b>Özünü-İnkişaf Paneli:</b> <code>/tekamul</code> — Qaralama qaydalar, Boz Zona dosyeləri və Düşünmə alqoritmi\n" +
+      "• 🧪 <b>Canlı Avtonom Sınaq:</b> <code>/sinaq</code> — 3-pilləli ağıllı öyrənmə dövrəsini dərhal işə sal\n" +
+      "• 🧮 <b>Kalkulyator:</b> <code>hesabla maaş 1500 net</code> və ya <code>hesabla son haqq-hesab 1500 maaş 14 gün</code>\n" +
       "• 📰 <b>Həftəlik Bülleten:</b> <code>/bulleten</code> — Qruplardan toplanmış canlı keyslərin icmalı\n" +
       "• 📉 <b>Bilik Boşluqları:</b> <code>/bosluqlar</code> — Bazada sənəd çatışmayan mövzuların hesabatı\n" +
       "• 🧬 <b>Yaddaş Konsolidasiyası:</b> <code>/yaddas_temizle</code> — Dublikat və ziddiyyətli qeydləri birləşdir\n" +
-      "• 🧠 <b>Semantik Vektor İndeksi:</b> <code>/vektor_yenile</code> — Bütün bazanı məna üzrə indekslə\n" +
       "• 💾 <b>Baza Yedəkləməsi:</b> <code>/backup</code> — SQLite bazasını ehtiyat fayl kimi göndər\n" +
-      "• 🎙️ <b>Səsli Cavab:</b> Cavabın altındakı <code>[🎙️ Səslə Dinlə]</code> düyməsi ilə audio dinləmə\n" +
-      "• ℹ️ <b>Sistem Statusu:</b> <code>/status</code> və ya <code>/versiya</code>\n" +
-      "• 📌 <b>Şəxsi Qayda Qeydi:</b> <code>/qeyd Mətn...</code>\n\n" +
+      "• ℹ️ <b>Sistem Statusu:</b> <code>/status</code> | 📌 <b>Şəxsi Qayda:</b> <code>/qeyd Mətn...</code>\n\n" +
       "💼 <b>Qrup Təcrübələri:</b> Digər Telegram qruplarındakı maraqlı mühasib müzakirələrini bura Forward etsəniz, avtomatik <b>Mühasibatlıq Praktikası Bankına</b> yazılacaq!"
     );
+    return;
+  }
+
+  // Kitabxana sahələri (/saheler)
+  if (metn === "/saheler") {
+    const saheler = db.saheleriAl();
+    const aktiv = db.aktivSaheAl();
+    const duymeler = saheler.map(s => ([{
+      text: `${s.id === aktiv?.id ? "✅ " : ""}${s.ikon || "📚"} ${s.ad} (${s.menbe_sayi || 0} mənbə)`,
+      callback_data: `sahe_sec_${s.id}`
+    }]));
+    await tgMesajGonder(
+      token,
+      chatId,
+      `📚 <b>BeyinAI Kitabxana Rəfləri:</b>\nAktiv istiqamət: <b>${aktiv?.ikon || "💼"} ${aktiv?.ad || "Vergi və Mühasibatlıq"}</b>\n\nSahəni dəyişmək üçün aşağıdan seçin:`,
+      { reply_markup: { inline_keyboard: duymeler } }
+    );
+    return;
+  }
+
+  // Özünü-İnkişaf v2.0 Statusu və Təsdiq İdarəetməsi (/tekamul, /qaralama, /bozzona)
+  if (metn === "/tekamul" || metn === "/inkisaf" || metn === "/qaralama" || metn === "/bozzona") {
+    const aktivSahe = db.aktivSaheIdAl();
+    const qaralamalar = db.qaralamaYaddaslariAl(aktivSahe);
+    const bozlar = db.mubahiseliDosyeleriAl(aktivSahe, "gozleyir");
+    const dusunmeler = db.dusunmeQaydalariniAl(aktivSahe);
+
+    let xulase = `🧬 <b>BeyinAI Özünü-İnkişaf Mərkəzi:</b>\n` +
+      `• 📝 Təsdiq gözləyən Qaralamalar: <b>${qaralamalar.length}</b>\n` +
+      `• ⚖️ Açıq Boz Zona Dosyeləri: <b>${bozlar.length}</b>\n` +
+      `• 🧠 Öyrənilmiş Düşünmə Alqoritmi Qaydaları: <b>${dusunmeler.length}</b>\n`;
+
+    if (dusunmeler.length > 0) {
+      xulase += `\n<b>Son Metodoloji Qaydalar ("Niyə səhv etdim?"):</b>\n` +
+        dusunmeler.slice(0, 3).map((d, i) => `${i + 1}. <i>${d.yoxlama_qaydasi}</i>`).join("\n");
+    }
+    await tgMesajGonder(token, chatId, xulase);
+
+    for (const q of qaralamalar.slice(0, 3)) {
+      await tgMesajGonder(
+        token,
+        chatId,
+        `📝 <b>Namizəd Qaralama Qayda:</b>\n${q.metn.slice(0, 500)}`,
+        {
+          reply_markup: {
+            inline_keyboard: [[
+              { text: "👍 Qızıl Yaddaşa Təsdiqlə", callback_data: `qar_ok_${q.id}` },
+              { text: "🗑️ Rədd Et", callback_data: `qar_no_${q.id}` }
+            ]]
+          }
+        }
+      );
+    }
+
+    for (const b of bozlar.slice(0, 3)) {
+      await tgMesajGonder(
+        token,
+        chatId,
+        `⚖️ <b>Boz Zona Dosyesi: ${b.movzu}</b>\n\n👮‍♂️ <b>Müfəttiş:</b> ${b.teref_a_mufettis}\n\n💼 <b>Baş Mühasib:</b> ${b.teref_b_muhasib}`,
+        {
+          reply_markup: {
+            inline_keyboard: [[
+              { text: "👮‍♂️ Müfəttiş Mövqeyi", callback_data: `boz_a_${b.id}` },
+              { text: "💼 Baş Mühasib Mövqeyi", callback_data: `boz_b_${b.id}` }
+            ]]
+          }
+        }
+      );
+    }
+    return;
+  }
+
+  // Canlı 3-Pilləli Avtonom Sınaq Dövrəsi (/sinaq)
+  if (metn === "/sinaq") {
+    await tgMesajGonder(token, chatId, "🧪 <b>3-pilləli avtonom öyrənmə və sınaq dövrəsi başladıldı...</b> (1. Boşluqlar → 2. Canlı Çat → 3. Çarpaz Maddələr)");
+    try {
+      const scheduler = require("./scheduler");
+      const net = await scheduler.avtoTedqiqatDovresiCalisdir({ mecburidir: true });
+      if (!net.telegramGonderildi && net.vebBildiris) {
+        await tgMesajGonder(token, chatId, `✅ <b>${net.vebBildiris.basliq}</b>\n\n${net.vebBildiris.metn.replace(/\*\*/g, "")}`);
+      }
+    } catch (err) {
+      await tgMesajGonder(token, chatId, `⚠️ Sınaq xətası: ${err.message}`);
+    }
     return;
   }
 
@@ -498,22 +613,19 @@ async function tgUpdateEmalEt(token, update) {
       token,
       chatId,
       `🤖 <b>BeyinAI Sistem Statusu:</b>\n\n` +
-      `🏷️ <b>Versiya:</b> v3.0 (24 Noyabr 2026)\n` +
+      `🏷️ <b>Versiya:</b> v4.0 (Özünü-İnkişaf və Kitabxana Sistemi)\n` +
+      `📚 <b>Aktiv Sahə:</b> ${stat.aktivSahe?.ikon || "💼"} ${stat.aktivSahe?.ad || "Vergi və Mühasibatlıq"}\n` +
       `🧠 <b>AI Modeli:</b> ${tenz.gemini_model || "gemini-3-flash-preview"}\n` +
-      `⚡ <b>Mühərrik:</b> ReAct Multi-Query + 2-Mərhələli Tənqidçi Müfəttiş (Critic Pass)\n` +
-      `🛡️ <b>Server Qalxanı:</b> Rate-Limit + Təhlükəsiz Başlıqlar + Global Qoruyucu\n` +
-      `⚖️ <b>Qanun vs Praktika Detektoru:</b> Aktiv\n` +
-      `🧬 <b>Yaddaşın Özünü-Təmizləməsi:</b> Aktiv (/yaddas_temizle)\n` +
-      `📉 <b>Bilik Boşluğu İzləməsi:</b> Aktiv (/bosluqlar)\n` +
-      `💾 <b>1-Kliklə Baza Backup:</b> Aktiv (/backup)\n\n` +
+      `⚡ <b>Mühərrik:</b> ReAct + Konsilium Debatı + 4-Bəndli Müfəttiş + Kök-Səbəb Alqoritmi\n` +
+      `⏱️ <b>Avtonom Tədqiqat Tezliyi:</b> ${tenz.scheduler_tezlik || "gunde_1"}\n\n` +
       `📊 <b>Baza Statistikası:</b>\n` +
-      `  • 📁 Qovluqlar: ${stat.qovluqSayi || 0}\n` +
-      `  • 📄 Mənbələr / Sənədlər: ${stat.menbeSayi || 0}\n` +
-      `  • 🧩 İndekslənmiş Hissələr: ${stat.parcaSayi || 0}\n` +
+      `  • 📚 Kitabxana Sahələri: ${stat.saheSayi || 0} (${stat.movzuSayi || 0} mövzu)\n` +
+      `  • 📄 Mənbələr / Sənədlər: ${stat.menbeSayi || 0} (${stat.parcaSayi || 0} blok)\n` +
       `  • 🧬 Semantik Vektorlu: ${vekStat.vektorlu} / ${vekStat.cemi} (${vekStat.faiz}%)\n` +
-      `  • 🧠 Şəxsi Yaddaş Faktları: ${stat.yaddasSayi || 0}\n` +
+      `  • 🟢 Qızıl Yaddaş Qaydaları: ${stat.yaddasSayi || 0} | 📝 Qaralama: ${stat.qaralamaSayi || 0} | 📜 Arxiv: ${stat.arxivYaddasSayi || 0}\n` +
+      `  • 🧠 Düşünmə Qaydaları: ${stat.dusunmeQaydaSayi || 0} | ⚖️ Boz Zona: ${stat.mubahiseliSayi || 0}\n` +
       `  • 📉 Açıq Bilik Boşluqları: ${stat.bosluqSayi || 0}\n\n` +
-      `✅ <i>Bütün modullar aktiv və problemsiz işləyir!</i>`
+      `✅ <i>Bütün modullar tam inteqrasiya olunub və işləyir!</i>`
     );
     return;
   }
@@ -1026,10 +1138,24 @@ function veziyyetiAl() {
   };
 }
 
+async function proaktivBildirisGonder(metn, secimler = {}) {
+  const tenz = db.tenzimlemeleriAl();
+  const token = (tenz.tg_bot_token || process.env.TELEGRAM_BOT_TOKEN || "").trim();
+  const chatId = tenz.tg_bildiris_chat_id || tenz.tg_son_chat_id || tgVeziyyet.sonChatId;
+  if (!token || !chatId) return { ok: false, xeta: "Telegram token və ya chat_id yoxdur." };
+  try {
+    return await tgMesajGonder(token, chatId, metn, secimler);
+  } catch (err) {
+    return { ok: false, xeta: err.message };
+  }
+}
+
 module.exports = {
   tgBaslat,
   tgDayandir,
   tgMesajiHisselereBol,
+  tgMesajGonder,
+  proaktivBildirisGonder,
   canliMesajiBazayaYaz,
   veziyyetiAl
 };
