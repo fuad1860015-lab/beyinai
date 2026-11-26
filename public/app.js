@@ -93,6 +93,8 @@ async function melumatlariYenile() {
     const data = await apiSorgu(`/api/bootstrap?qovluq_id=${encodeURIComponent(veziyyet.aktivQovluq)}`);
     veziyyet.saheler = data.saheler || [];
     veziyyet.aktivSahe = data.aktiv_sahe || null;
+    veziyyet.aktivSaheProfili = data.aktiv_sahe_profili || null;
+    veziyyet.bacariqXeritesi = data.bacariq_xeritesi || { movzular: [], xulase: {} };
     veziyyet.saheMovzulari = data.sahe_movzulari || [];
     veziyyet.qovluqlar = data.qovluqlar || [];
     veziyyet.menbeler = data.menbeler || [];
@@ -167,6 +169,31 @@ function kitabxanaCiz() {
     if (saheIkonEl) saheIkonEl.textContent = sahe.ikon || "📚";
   }
 
+  const sualInp = document.getElementById("sualInput");
+  if (sualInp && veziyyet.aktivSaheProfili?.sual_ipucu) {
+    sualInp.placeholder = veziyyet.aktivSaheProfili.sual_ipucu;
+  }
+
+  const profilQabi = document.getElementById("aktivSaheProfilQabi");
+  if (profilQabi) {
+    const pr = veziyyet.aktivSaheProfili;
+    if (pr) {
+      profilQabi.innerHTML = `
+        <div class="tekamul-qutu-basliq" style="margin-bottom:5px;">
+          <span>🧠 "${htmlQoru(sahe?.ad || "Aktiv Sahə")}" üzrə Avtomatik Müstəqil Düşünmə Rolları</span>
+        </div>
+        <div style="font-size:11.5px; color:var(--metn-ikincil); display:flex; flex-direction:column; gap:3px;">
+          <div>🥊 <strong>Əks-Hücum Tənqidçisi:</strong> ${htmlQoru(pr.teref_a_rol)}</div>
+          <div>🛠️ <strong>Həll Qurucusu:</strong> ${htmlQoru(pr.teref_b_rol)} • <strong>Yekun:</strong> ${htmlQoru(pr.hakim_rol)}</div>
+          <div style="color:var(--metn-solgun); margin-top:2px;">🔎 <em>Yoxlama sualı: ${htmlQoru(pr.eks_hucum_suali || "")}</em></div>
+        </div>
+      `;
+      profilQabi.style.display = "block";
+    } else {
+      profilQabi.style.display = "none";
+    }
+  }
+
   const kartlarQabi = document.getElementById("sahelerKartlarQabi");
   if (kartlarQabi) {
     kartlarQabi.innerHTML = (veziyyet.saheler || []).map(s => {
@@ -239,6 +266,8 @@ async function simulyatorModalAc(baslangicTab = null) {
     veziyyet.simSsenariler = ssenariRes.ssenariler || [];
     veziyyet.simStatistika = ssenariRes.statistika || {};
     veziyyet.simulyasiyalar = tarixceRes.simulyasiyalar || [];
+    veziyyet.aktivSaheProfili = tekamulRes.aktiv_sahe_profili || veziyyet.aktivSaheProfili;
+    veziyyet.bacariqXeritesi = tekamulRes.bacariq_xeritesi || veziyyet.bacariqXeritesi;
     veziyyet.qaralamalar = tekamulRes.qaralamalar || [];
     veziyyet.arxivYaddaslar = tekamulRes.arxiv_yaddaslar || [];
     veziyyet.dusunmeQaydalari = tekamulRes.dusunme_qaydalari || [];
@@ -309,14 +338,16 @@ function tekamulPanelleriCiz() {
     if (gozleyenBozlar.length === 0) {
       bozQabi.innerHTML = `<div style="font-size:12px; color:var(--metn-ikincil); padding:4px 0;">✅ Hazırda qərar gözləyən mübahisəli məsələ yoxdur.</div>`;
     } else {
+      const rolA = veziyyet.aktivSaheProfili?.teref_a_rol || "👮‍♂️ Tənqidçi Mövqeyi";
+      const rolB = veziyyet.aktivSaheProfili?.teref_b_rol || "💼 Praktik Həll Mövqeyi";
       bozQabi.innerHTML = gozleyenBozlar.map(d => `
         <div class="tekamul-element">
           <div style="font-weight:700; color:#fde68a; margin-bottom:4px;">⚖️ ${htmlQoru(d.movzu)}</div>
-          <div style="margin-bottom:3px;">👮‍♂️ <strong>Müfəttiş yanaşması:</strong> ${htmlQoru(d.teref_a_mufettis)}</div>
-          <div>💼 <strong>Baş Mühasib yanaşması:</strong> ${htmlQoru(d.teref_b_muhasib)}</div>
+          <div style="margin-bottom:3px;"><strong>${htmlQoru(rolA)}:</strong> ${htmlQoru(d.teref_a_mufettis)}</div>
+          <div><strong>${htmlQoru(rolB)}:</strong> ${htmlQoru(d.teref_b_muhasib)}</div>
           <div class="tekamul-duymeler">
-            <button type="button" class="tekamul-btn" data-boz-id="${htmlQoru(d.id)}" data-movqe="teref_a">👮‍♂️ Müfəttiş Mövqeyini Seç</button>
-            <button type="button" class="tekamul-btn tesdiq" data-boz-id="${htmlQoru(d.id)}" data-movqe="teref_b">💼 Baş Mühasib Mövqeyini Seç</button>
+            <button type="button" class="tekamul-btn" data-boz-id="${htmlQoru(d.id)}" data-movqe="teref_a">${htmlQoru(rolA)} Seç</button>
+            <button type="button" class="tekamul-btn tesdiq" data-boz-id="${htmlQoru(d.id)}" data-movqe="teref_b">${htmlQoru(rolB)} Seç</button>
           </div>
         </div>
       `).join("");
@@ -362,11 +393,17 @@ function tekamulPanelleriCiz() {
 
 async function dinamikSimulyasiyaIcraEt(dinamikNov = "carpaz_madde") {
   const saheId = veziyyet.aktivSahe ? veziyyet.aktivSahe.id : "vergi_muhasibat";
-  bildirisGoster(dinamikNov === "canli_cat" ? "💬 Canlı mühasib çatlarından mübahisəli sual sınanılır..." : "🔀 Maddələrin çarpaz kəsişməsindən çətin keys qurulur və həll edilir...");
+  const mesajMap = {
+    zeif_movzu: "🎯 Zəif mövzu seçildi — hədəfli özünü-məşq sınağı aparılır...",
+    canli_cat: "💬 Canlı çatlardan mübahisəli sual sınanılır...",
+    carpaz_madde: "🔀 Qaydaların çarpaz kəsişməsindən çətin məsələ qurulur və həll edilir..."
+  };
+  bildirisGoster(mesajMap[dinamikNov] || mesajMap.carpaz_madde);
   try {
     const res = await apiSorgu("/api/tekamul/dinamik-sinaq", "POST", { dinamikNov, sahe_id: saheId }, { timeoutMs: 90000 });
     if (res.ok) {
       veziyyet.simStatistika = res.statistika || {};
+      veziyyet.bacariqXeritesi = res.bacariq_xeritesi || veziyyet.bacariqXeritesi;
       veziyyet.qaralamalar = res.qaralamalar || veziyyet.qaralamalar;
       veziyyet.dusunmeQaydalari = res.dusunme_qaydalari || veziyyet.dusunmeQaydalari;
       veziyyet.yaddas = res.yaddas || veziyyet.yaddas;
@@ -374,15 +411,53 @@ async function dinamikSimulyasiyaIcraEt(dinamikNov = "carpaz_madde") {
       veziyyet.simulyasiyalar = tRes.simulyasiyalar || [];
       simulyatorCiz();
       yaddasCiz();
-      bildirisGoster(`✅ Dinamik sınaq tamamlandı: ${res.netice.basliq} (${res.netice.bal}%)`);
+      bildirisGoster(`✅ Sınaq tamamlandı: ${res.netice.basliq} (${res.netice.bal}%)`);
     }
   } catch (err) {
     bildirisGoster("⚠️ " + err.message);
   }
 }
 
+function bacariqXeritesiniCiz() {
+  const qabi = document.getElementById("bacariqXeritesiQabi");
+  const xulaseEl = document.getElementById("bacariqXulaseEtiket");
+  if (!qabi) return;
+
+  const xerite = veziyyet.bacariqXeritesi || { movzular: [], xulase: {} };
+  const list = xerite.movzular || [];
+  const x = xerite.xulase || {};
+
+  if (xulaseEl) {
+    xulaseEl.textContent = list.length > 0
+      ? `🔴 ${x.zeifSay || 0} zəif • 🟡 ${x.ortaSay || 0} orta • 🟢 ${x.gucluSay || 0} güclü`
+      : "";
+  }
+
+  if (list.length === 0) {
+    qabi.innerHTML = `<div style="font-size:12px; color:var(--metn-solgun);">Hələ mövzu xəritəsi yaranmayıb — ilk sınaqdan sonra avtomatik dolacaq.</div>`;
+    return;
+  }
+
+  qabi.innerHTML = list.slice(0, 8).map(m => {
+    const reng = m.seviyye === "zeif" ? "#ef4444" : (m.seviyye === "guclu" ? "#10b981" : "#f59e0b");
+    const nisan = m.seviyye === "zeif" ? "🔴 Zəif" : (m.seviyye === "guclu" ? "🟢 Güclü" : "🟡 Orta");
+    return `
+      <div class="bacariq-satir">
+        <div class="bacariq-satir-ust">
+          <span style="color:#f1f5f9; font-weight:500;">${htmlQoru(m.movzu)}</span>
+          <span style="color:${reng}; font-weight:700; white-space:nowrap;">${nisan} (${m.deqiqlik_faizi}%)</span>
+        </div>
+        <div class="bacariq-zolagi">
+          <div class="bacariq-ic" style="width:${Math.max(8, m.deqiqlik_faizi)}%; background:${reng};"></div>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
 function simulyatorCiz() {
   tekamulPanelleriCiz();
+  bacariqXeritesiniCiz();
   const stat = veziyyet.simStatistika || {};
   const elUmumi = document.getElementById("statSimUmumi");
   const elBal = document.getElementById("statSimBal");
@@ -505,6 +580,7 @@ async function simulyasiyaIcraEt() {
 
     if (res.ok) {
       veziyyet.simStatistika = res.statistika || {};
+      veziyyet.bacariqXeritesi = res.bacariq_xeritesi || veziyyet.bacariqXeritesi;
       veziyyet.yaddas = res.yaddas || veziyyet.yaddas;
       veziyyet.saheMovzulari = res.sahe_movzulari || veziyyet.saheMovzulari;
 
@@ -1100,13 +1176,21 @@ function sohbetleriCiz() {
   if (veziyyet.sohbetler.length === 0) {
     const aktivSaheAd = veziyyet.aktivSahe ? veziyyet.aktivSahe.ad : "Vergi və Mühasibatlıq";
     const aktivSaheIkon = veziyyet.aktivSahe ? (veziyyet.aktivSahe.ikon || "💼") : "💼";
+    const pr = veziyyet.aktivSaheProfili || {};
+    const numuneSuallar = Array.isArray(pr.numune_suallar) && pr.numune_suallar.length > 0
+      ? pr.numune_suallar.slice(0, 3)
+      : [
+          "Mikro sahibkar üçün 75% gəlir və mənfəət vergisi güzəşti hansı şərtlərlə tətbiq olunur?",
+          "İşdən çıxan işçinin istifadə edilməmiş məzuniyyət kompensasiyası və son haqq-hesabı necə hesablanır?",
+          "ƏDV-nin əvəzləşdirilməsi üçün hansı sənədlər və elektron qaimə şərtləri mütləqdir?"
+        ];
     qutu.innerHTML = `
       <div class="xos-geldin-qabi">
         <div class="xos-geldin-ust">
           <div class="xos-geldin-ikon">🧠</div>
           <h2 class="xos-geldin-basliq">BeyinAI ilə necə işləmək istəyirsiniz?</h2>
           <p class="xos-geldin-altbasliq">
-            Aktiv bilik sahəsi: <strong>${htmlQoru(aktivSaheIkon)} ${htmlQoru(aktivSaheAd)}</strong>. Suallarınızı rəsmi qanun maddələrinə əsaslanaraq cavablandırır, sənədlərinizi yoxlayır və mühasibatlıq hesablamaları aparır.
+            Aktiv sahə: <strong>${htmlQoru(aktivSaheIkon)} ${htmlQoru(aktivSaheAd)}</strong>. Yarımçıq suallarda Qərar Ağacı qurur, <em>${htmlQoru(pr.teref_a_rol || "Əks-Hücum Tənqidçisi")}</em> gözü ilə cavabı yoxlayır və öz zəif mövzularını məşq edir.
           </p>
         </div>
 
@@ -1114,46 +1198,42 @@ function sohbetleriCiz() {
           <button type="button" class="baslangic-kart" data-baslangic="sual">
             <span class="baslangic-kart-ikon">💬</span>
             <div>
-              <div class="baslangic-kart-ad">Vergi və Hüquq Sualı Soruş</div>
-              <div class="baslangic-kart-izah">Qanun maddələri, güzəştlər, risklər və mühasibatlıq üzrə dəqiq izah alın</div>
+              <div class="baslangic-kart-ad">${htmlQoru(aktivSaheAd)} Sualı Soruş</div>
+              <div class="baslangic-kart-izah">Qərar ağacı, dəqiq mənbə istinadları və əks-hücum risk təhlili ilə izah alın</div>
             </div>
           </button>
 
           <button type="button" class="baslangic-kart" data-baslangic="fayl">
             <span class="baslangic-kart-ikon">📁</span>
             <div>
-              <div class="baslangic-kart-ad">Müqavilə və ya Sənəd Yüklə</div>
+              <div class="baslangic-kart-ad">Sənəd və ya Müzakirə Yüklə</div>
               <div class="baslangic-kart-izah">PDF, Word, Excel cədvəli və ya WhatsApp/Telegram müzakirəsini təhlil etdirin</div>
             </div>
           </button>
 
-          <button type="button" class="baslangic-kart" data-baslangic="haqqhesab">
-            <span class="baslangic-kart-ikon">🧮</span>
+          <button type="button" class="baslangic-kart" data-baslangic="kitabxana">
+            <span class="baslangic-kart-ikon">📚</span>
             <div>
-              <div class="baslangic-kart-ad">Maaş və Son Haqq-Hesab Hesabla</div>
-              <div class="baslangic-kart-izah">Gross/Net əməkhaqqı, məzuniyyət kompensasiyası və çap vərəqəsi hazırlayın</div>
+              <div class="baslangic-kart-ad">Bilik Sahəsini Dəyiş və ya Yarat</div>
+              <div class="baslangic-kart-izah">Vergi, Hüquq, Biznes, IT və ya tam yeni sahə yaradıb avtomatik kökləyin</div>
             </div>
           </button>
 
           <button type="button" class="baslangic-kart" data-baslangic="simulyator">
             <span class="baslangic-kart-ikon">🧬</span>
             <div>
-              <div class="baslangic-kart-ad">Özünü-İnkişaf və Bilik Sınağı</div>
-              <div class="baslangic-kart-izah">Yeni öyrənilmiş qaydaları təsdiqləyin və praktiki məsələlərlə məşq edin</div>
+              <div class="baslangic-kart-ad">Özünü-İnkişaf və Zəiflik Xəritəsi</div>
+              <div class="baslangic-kart-izah">Yeni qaydaları təsdiqləyin, güclü/zəif mövzulara baxın və hədəfli məşq edin</div>
             </div>
           </button>
         </div>
 
         <div class="xos-geldin-numuneler">
-          <button type="button" class="numune-sual-cip" data-numune-sual="Mikro sahibkar üçün 75% gəlir və mənfəət vergisi güzəşti hansı şərtlərlə tətbiq olunur?">
-            💡 Mikro sahibkarın 75% vergi güzəşti şərtləri
-          </button>
-          <button type="button" class="numune-sual-cip" data-numune-sual="İşdən çıxan işçinin istifadə edilməmiş məzuniyyət kompensasiyası və son haqq-hesabı necə hesablanır?">
-            💡 İşdən çıxan işçinin məzuniyyət kompensasiyası
-          </button>
-          <button type="button" class="numune-sual-cip" data-numune-sual="ƏDV-nin əvəzləşdirilməsi üçün hansı sənədlər və elektron qaimə şərtləri mütləqdir?">
-            💡 ƏDV əvəzləşdirilməsi qaydaları
-          </button>
+          ${numuneSuallar.map(ns => `
+            <button type="button" class="numune-sual-cip" data-numune-sual="${htmlQoru(ns)}">
+              💡 ${htmlQoru(ns.length > 68 ? ns.slice(0, 66) + "..." : ns)}
+            </button>
+          `).join("")}
         </div>
       </div>
     `;
@@ -1166,6 +1246,9 @@ function sohbetleriCiz() {
           if (inp) inp.focus();
         } else if (emel === "fayl") {
           document.getElementById("faylSecici")?.click();
+        } else if (emel === "kitabxana") {
+          kitabxanaCiz();
+          document.getElementById("modalKitabxana").hidden = false;
         } else if (emel === "haqqhesab") {
           modalHaqqHesabAc();
         } else if (emel === "simulyator") {
@@ -2477,7 +2560,8 @@ document.addEventListener("DOMContentLoaded", () => {
         veziyyet.saheler = net.saheler;
         document.getElementById("yeniSaheAd").value = "";
         document.getElementById("yeniSaheAciqlama").value = "";
-        bildirisGoster(`✅ Yeni sahə yaradıldı: ${ad}`);
+        const rolMesaj = net.profil ? ` (Tənqidçi: ${net.profil.teref_a_rol})` : "";
+        bildirisGoster(`✅ Yeni sahə və müstəqil düşünmə qaydaları quruldu: ${ad}${rolMesaj}`);
         kitabxanaCiz();
       } catch (err) {
         bildirisGoster("⚠️ " + err.message);
@@ -2511,6 +2595,13 @@ document.addEventListener("DOMContentLoaded", () => {
   if (btnSimAvtoTedqiq) {
     btnSimAvtoTedqiq.addEventListener("click", () => {
       simulyatorAvtoTedqiqEt();
+    });
+  }
+
+  const btnSimZeifMesq = document.getElementById("btnSimZeifMesq");
+  if (btnSimZeifMesq) {
+    btnSimZeifMesq.addEventListener("click", () => {
+      dinamikSimulyasiyaIcraEt("zeif_movzu");
     });
   }
 

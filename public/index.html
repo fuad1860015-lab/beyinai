@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>BeyinAI — Vergi, Hüquq və Mühasibatlıq Köməkçisi</title>
-  <link rel="stylesheet" href="/style.css?v=5.0" />
+  <title>BeyinAI — Müstəqil Düşünən Universal AI Mühərriki</title>
+  <link rel="stylesheet" href="/style.css?v=5.1" />
 </head>
 <body>
   <!-- 1. ÜST PANEL: Claude / ChatGPT tərzi təmiz və sakit (yalnız ən vacib 3 element) -->
@@ -76,7 +76,7 @@
             <span class="sol-alet-ikon">📚</span>
             <div class="sol-alet-metn">
               <div class="sol-alet-ad">Bilik Sahələri</div>
-              <div class="sol-alet-izah">Vergi, Əmək və ya yeni sahə seçin</div>
+              <div class="sol-alet-izah">İstənilən sahəni seçin və ya yenisini yaradın</div>
             </div>
           </button>
 
@@ -353,7 +353,9 @@
           <div class="saheler-kartlar-qabi" id="sahelerKartlarQabi"></div>
         </div>
 
-        <div style="margin-top:16px;">
+        <div id="aktivSaheProfilQabi" class="tekamul-qutu" style="margin-top:12px;"></div>
+
+        <div style="margin-top:14px;">
           <label class="bolme-etiket">Bu Sahədə Öyrənilmiş Mövzular (<span id="oyrenilmisMovzuSay">0</span>):</label>
           <div class="movzular-siyahisi" id="saheMovzulariSiyahisi"></div>
         </div>
@@ -449,16 +451,27 @@
             <button type="button" class="duyme esas" id="btnSimIcraEt">
               ⚡ <span id="btnSimIcraMetn">Seçilmiş Məsələni Yoxla</span>
             </button>
-            <button type="button" class="duyme ikincil-duyme" id="btnSimCarpazMadde" title="2-3 fərqli maddəni birləşdirib çətin sual yaradır">
-              🔀 Çarpaz Maddə Sınağı
+            <button type="button" class="duyme ikincil-duyme" id="btnSimZeifMesq" title="Ən zəif nəticə göstərilmiş mövzu üzrə hədəfli sınaq keçirir">
+              🎯 Zəif Mövzuda Məşq Et
             </button>
-            <button type="button" class="duyme ikincil-duyme" id="btnSimCanliCat" title="Çat qruplarındakı real mübahisəni qanunla yoxlayır">
+            <button type="button" class="duyme ikincil-duyme" id="btnSimCarpazMadde" title="2-3 fərqli qaydanı birləşdirib çətin sual yaradır">
+              🔀 Çarpaz Qayda Sınağı
+            </button>
+            <button type="button" class="duyme ikincil-duyme" id="btnSimCanliCat" title="Çat qruplarındakı real mübahisəni yoxlayır">
               💬 Çat Müzakirəsini Yoxla
             </button>
           </div>
 
           <div id="simCanliNeticeQutusu" style="display:none; margin-bottom:14px;">
             <div class="sim-netice-karti" id="simNeticeKarti"></div>
+          </div>
+
+          <div class="tekamul-qutu" style="margin-bottom:12px;">
+            <div class="tekamul-qutu-basliq">
+              <span>📊 Güclü və Zəif Mövzular Xəritəsi (Harada güclüyəm / zəifəm?)</span>
+              <span id="bacariqXulaseEtiket" style="font-size:11px; color:var(--metn-ikincil); font-weight:500;"></span>
+            </div>
+            <div id="bacariqXeritesiQabi" class="bacariq-xeritesi-siyahi"></div>
           </div>
 
           <label class="bolme-etiket">Hazır Sınaq Məsələləri (Birini seçin):</label>
@@ -604,7 +617,7 @@
   <div id="bildirisQutusu" class="bildiris-qutusu" hidden></div>
   <div id="modalBaglantilar" hidden><input type="text" id="bagTgToken" /><button id="btnTgQos"></button><span id="tgStatusEtiket"></span><span id="nlmKorpuStatusEtiket"></span><button id="btnBookmarkletKopyala"></button><a id="wpBookmarkletLink" href="#"></a><div id="tgMelumatQutusu"></div></div>
 
-  <script src="/app.js?v=5.0"></script>
+  <script src="/app.js?v=5.1"></script>
   <script>
     document.addEventListener("DOMContentLoaded", () => {
       const btnToggle = document.getElementById("btnPanelToggle");
