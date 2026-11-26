@@ -110,14 +110,7 @@ async function melumatlariYenile() {
     veziyyet.mubahiseliDosyeler = data.mubahiseli_dosyeler || [];
     veziyyet.qanunTesirleri = data.qanun_tesir_hesabatlari || [];
 
-    const gozleyenCem = veziyyet.qaralamalar.length + veziyyet.mubahiseliDosyeler.length;
-    const btnSim = document.getElementById("btnSimulyatorAc");
-    if (btnSim) {
-      btnSim.innerHTML = gozleyenCem > 0
-        ? `🧪 Sınaq Mərkəzi <span class="bildiris-saygac" style="background:#a855f7;">${gozleyenCem}</span>`
-        : `🧪 Sınaq Mərkəzi`;
-    }
-
+    tekamulSaygaclariYenile();
     statistikaCiz(data.statistika);
     bildirislerSaygacYenile();
     kitabxanaCiz();
@@ -130,6 +123,39 @@ async function melumatlariYenile() {
   } catch (err) {
     bildirisGoster("⚠️ " + err.message);
   }
+}
+
+function tekamulSaygaclariYenile() {
+  const qarSay = (veziyyet.qaralamalar || []).length;
+  const bozSay = (veziyyet.mubahiseliDosyeler || []).filter(d => !d.status || d.status === "gozleyir").length;
+  const gozleyenCem = qarSay + bozSay;
+
+  const solBadge = document.getElementById("solTekamulSaygac");
+  if (solBadge) {
+    if (gozleyenCem > 0) {
+      solBadge.textContent = gozleyenCem;
+      solBadge.style.display = "inline-block";
+    } else {
+      solBadge.style.display = "none";
+    }
+  }
+
+  const tabSay = document.getElementById("tabSayTesdiq");
+  if (tabSay) {
+    tabSay.textContent = gozleyenCem;
+  }
+}
+
+function simTabSec(hedefTabId) {
+  if (!hedefTabId) return;
+  document.querySelectorAll("[data-sim-tab]").forEach(btn => {
+    btn.classList.toggle("aktiv", btn.getAttribute("data-sim-tab") === hedefTabId);
+  });
+  document.querySelectorAll(".sim-tab-panel").forEach(panel => {
+    const uygun = panel.id === hedefTabId;
+    panel.classList.toggle("aktiv", uygun);
+    panel.hidden = !uygun;
+  });
 }
 
 function kitabxanaCiz() {
@@ -202,7 +228,7 @@ function kitabxanaCiz() {
   }
 }
 
-async function simulyatorModalAc() {
+async function simulyatorModalAc(baslangicTab = null) {
   const saheId = veziyyet.aktivSahe ? veziyyet.aktivSahe.id : "vergi_muhasibat";
   try {
     const [ssenariRes, tarixceRes, tekamulRes] = await Promise.all([
@@ -222,6 +248,9 @@ async function simulyatorModalAc() {
       veziyyet.secilmisSsenariId = veziyyet.simSsenariler[0].id;
     }
     simulyatorCiz();
+    const gozleyenSay = (veziyyet.qaralamalar || []).length +
+      (veziyyet.mubahiseliDosyeler || []).filter(d => !d.status || d.status === "gozleyir").length;
+    simTabSec(baslangicTab || (gozleyenSay > 0 ? "tabTesdiq" : "tabSinaq"));
     document.getElementById("modalSimulyator").hidden = false;
   } catch (err) {
     bildirisGoster("⚠️ " + err.message);
@@ -230,6 +259,7 @@ async function simulyatorModalAc() {
 
 function tekamulPanelleriCiz() {
   const saheId = veziyyet.aktivSahe ? veziyyet.aktivSahe.id : "vergi_muhasibat";
+  tekamulSaygaclariYenile();
 
   // 1) Qaralama Dəftəri
   const qarQabi = document.getElementById("tekamulQaralamalarQabi");
@@ -238,13 +268,13 @@ function tekamulPanelleriCiz() {
   if (sayQar) sayQar.textContent = qarList.length;
   if (qarQabi) {
     if (qarList.length === 0) {
-      qarQabi.innerHTML = `<div style="font-size:11.5px; color:var(--metn-solgun);">Təsdiq gözləyən namizəd qayda yoxdur.</div>`;
+      qarQabi.innerHTML = `<div style="font-size:12px; color:var(--metn-ikincil); padding:4px 0;">✅ Hazırda təsdiq gözləyən yeni namizəd qayda yoxdur.</div>`;
     } else {
       qarQabi.innerHTML = qarList.map(q => `
         <div class="tekamul-element">
           <div>${htmlQoru(q.metn)}</div>
           <div class="tekamul-duymeler">
-            <button type="button" class="tekamul-btn tesdiq" data-qar-tesdiq="${htmlQoru(q.id)}">👍 Qızıl Yaddaşa Təsdiqlə</button>
+            <button type="button" class="tekamul-btn tesdiq" data-qar-tesdiq="${htmlQoru(q.id)}">👍 Yaddaşa Təsdiqlə</button>
             <button type="button" class="tekamul-btn redd" data-qar-redd="${htmlQoru(q.id)}">🗑️ Rədd Et</button>
           </div>
         </div>
@@ -256,7 +286,7 @@ function tekamulPanelleriCiz() {
           veziyyet.yaddas = res.yaddas || veziyyet.yaddas;
           tekamulPanelleriCiz();
           yaddasCiz();
-          bildirisGoster("✅ Qayda Qızıl Yaddaşa təsdiqləndi!");
+          bildirisGoster("✅ Qayda əsas yaddaşa təsdiqləndi!");
         };
       });
       qarQabi.querySelectorAll("[data-qar-redd]").forEach(btn => {
@@ -264,7 +294,7 @@ function tekamulPanelleriCiz() {
           const res = await apiSorgu("/api/tekamul/qaralama/redd", "POST", { id: btn.getAttribute("data-qar-redd"), sahe_id: saheId });
           veziyyet.qaralamalar = res.qaralamalar || [];
           tekamulPanelleriCiz();
-          bildirisGoster("🗑️ Namizəd qaralama silindi.");
+          bildirisGoster("🗑️ Namizəd qayda silindi.");
         };
       });
     }
@@ -277,13 +307,13 @@ function tekamulPanelleriCiz() {
   if (sayBoz) sayBoz.textContent = gozleyenBozlar.length;
   if (bozQabi) {
     if (gozleyenBozlar.length === 0) {
-      bozQabi.innerHTML = `<div style="font-size:11.5px; color:var(--metn-solgun);">Hazırda açıq mübahisəli boz zona dosyesi yoxdur.</div>`;
+      bozQabi.innerHTML = `<div style="font-size:12px; color:var(--metn-ikincil); padding:4px 0;">✅ Hazırda qərar gözləyən mübahisəli məsələ yoxdur.</div>`;
     } else {
       bozQabi.innerHTML = gozleyenBozlar.map(d => `
         <div class="tekamul-element">
           <div style="font-weight:700; color:#fde68a; margin-bottom:4px;">⚖️ ${htmlQoru(d.movzu)}</div>
-          <div style="margin-bottom:3px;">👮‍♂️ <strong>Müfəttiş:</strong> ${htmlQoru(d.teref_a_mufettis)}</div>
-          <div>💼 <strong>Baş Mühasib:</strong> ${htmlQoru(d.teref_b_muhasib)}</div>
+          <div style="margin-bottom:3px;">👮‍♂️ <strong>Müfəttiş yanaşması:</strong> ${htmlQoru(d.teref_a_mufettis)}</div>
+          <div>💼 <strong>Baş Mühasib yanaşması:</strong> ${htmlQoru(d.teref_b_muhasib)}</div>
           <div class="tekamul-duymeler">
             <button type="button" class="tekamul-btn" data-boz-id="${htmlQoru(d.id)}" data-movqe="teref_a">👮‍♂️ Müfəttiş Mövqeyini Seç</button>
             <button type="button" class="tekamul-btn tesdiq" data-boz-id="${htmlQoru(d.id)}" data-movqe="teref_b">💼 Baş Mühasib Mövqeyini Seç</button>
@@ -301,7 +331,7 @@ function tekamulPanelleriCiz() {
           veziyyet.yaddas = res.yaddas || veziyyet.yaddas;
           tekamulPanelleriCiz();
           yaddasCiz();
-          bildirisGoster("⚖️ Ekspertin İş Siyasəti Qızıl Yaddaşa həkk olundu!");
+          bildirisGoster("⚖️ Seçdiyiniz iş siyasəti yaddaşa saxlanıldı!");
         };
       });
     }
@@ -312,12 +342,12 @@ function tekamulPanelleriCiz() {
   const sayDus = document.getElementById("sayDusunmeQayda");
   const dusList = veziyyet.dusunmeQaydalari || [];
   const tesirList = veziyyet.qanunTesirleri || [];
-  if (sayDus) sayDus.textContent = dusList.length;
+  if (sayDus) sayDus.textContent = dusList.length + tesirList.length;
   if (dusQabi) {
     const dusHtml = dusList.map(q => `
       <div class="tekamul-element">
-        <div style="color:#a5b4fc; font-weight:600;">🧬 Kök-Səbəb: ${htmlQoru(q.sehv_koku)}</div>
-        <div style="margin-top:2px;">✓ <strong>Yoxlama Alqoritmi:</strong> ${htmlQoru(q.yoxlama_qaydasi)}</div>
+        <div style="color:#a5b4fc; font-weight:600;">🧬 Səhvin Səbəbi: ${htmlQoru(q.sehv_koku)}</div>
+        <div style="margin-top:2px;">✓ <strong>Yeni Yoxlama Qaydası:</strong> ${htmlQoru(q.yoxlama_qaydasi)}</div>
       </div>
     `).join("");
     const tesirHtml = tesirList.map(t => `
@@ -326,7 +356,7 @@ function tekamulPanelleriCiz() {
         <div style="margin-top:2px;">${htmlQoru(t.xulase)}</div>
       </div>
     `).join("");
-    dusQabi.innerHTML = (tesirHtml + dusHtml) || `<div style="font-size:11.5px; color:var(--metn-solgun);">Hələ əlavə metodoloji qayda yoxdur.</div>`;
+    dusQabi.innerHTML = (tesirHtml + dusHtml) || `<div style="font-size:12px; color:var(--metn-solgun);">Hələ əlavə yoxlama qaydası yaranmayıb.</div>`;
   }
 }
 
@@ -678,26 +708,26 @@ function ustPanelDurumYenile() {
   const btnDerin = document.getElementById("btnDerinRejim");
   if (btnDerin) {
     btnDerin.classList.toggle("aktiv", derinAktiv);
-    btnDerin.textContent = derinAktiv ? "🧠 Dərin Təhlil" : "⚡ Sürətli Rejim";
+    btnDerin.textContent = derinAktiv ? "🧠 Dərin Təhlil" : "⚡ Sürətli Cavab";
   }
 
   const statusDot = document.querySelector("#btnTenzimlemeler .status-dot");
-  let statusReng = "#ef4444"; // Qırmızı: açar yoxdur/səhvdir
+  let statusReng = "#ef4444";
 
   if (t.ai_provayder === "ollama") {
-    etiket.textContent = `Ollama (${t.ollama_model || "Lokal"})`;
+    if (etiket) etiket.textContent = "Lokal AI Aktiv";
     statusReng = "#10b981";
   } else if (t.ai_provayder === "groq" && t.groq_api_key && t.groq_api_key.trim().length >= 15) {
-    etiket.textContent = "Groq AI ✓";
+    if (etiket) etiket.textContent = "AI Hazırdır";
     statusReng = "#10b981";
   } else if (t.gemini_api_key && t.gemini_api_key.trim().length >= 20) {
-    etiket.textContent = derinAktiv ? "Gemini 3 • Dərin Zəka ✓" : "Gemini 3 • Sürətli ✓";
+    if (etiket) etiket.textContent = "AI Hazırdır";
     statusReng = "#10b981";
   } else if (t.gemini_api_key && t.gemini_api_key.trim().length > 0) {
-    etiket.textContent = "Gemini • Açar Yanlışdır ⚠️";
+    if (etiket) etiket.textContent = "Açar Yoxlanmalıdır";
     statusReng = "#f59e0b";
   } else {
-    etiket.textContent = "AI Açarı Tələb Olunur ⚠️";
+    if (etiket) etiket.textContent = "Tənzimləmələr";
     statusReng = "#ef4444";
   }
 
@@ -708,10 +738,12 @@ function ustPanelDurumYenile() {
   const tgAktiv = veziyyet.baglantilar?.telegram?.aktiv;
   const nlmAktiv = veziyyet.baglantilar?.notebooklm?.aktiv;
   const noqte = document.getElementById("canliNoqte");
-  if (tgAktiv || nlmAktiv) {
-    noqte.classList.add("aktiv");
-  } else {
-    noqte.classList.remove("aktiv");
+  if (noqte) {
+    if (tgAktiv || nlmAktiv) {
+      noqte.classList.add("aktiv");
+    } else {
+      noqte.classList.remove("aktiv");
+    }
   }
 }
 
@@ -724,7 +756,7 @@ function qovluqlariCiz() {
     <div class="qovluq-element ${veziyyet.aktivQovluq === "all" ? "aktiv" : ""}" data-qovluq="all">
       <div class="qovluq-sol">
         <span>🌐</span>
-        <span>Mərkəzi Beyin (Hamısı)</span>
+        <span>Bütün Sənədlər</span>
       </div>
       <span class="qovluq-say">${cemiMenbe}</span>
     </div>
@@ -791,8 +823,8 @@ function menbeleriCiz() {
 
   if (veziyyet.menbeler.length === 0) {
     qutu.innerHTML = `
-      <div style="text-align:center; padding: 24px 10px; color: var(--metn-solgun); font-size: 12px;">
-        Bu qovluqda hələ mənbə yoxdur.<br/>Yuxarıdan fayl sürüşdürün, link əlavə edin və ya <b>✨ Nümunə Data Yüklə</b> düyməsinə basın.
+      <div style="text-align:center; padding: 18px 10px; color: var(--metn-solgun); font-size: 12px; line-height:1.5;">
+        Bu qovluqda hələ sənəd yoxdur.<br/>Yuxarıdakı <b>📁 Fayl Yüklə</b> düyməsi ilə PDF, Word, Excel və ya çat əlavə edə bilərsiniz.
       </div>
     `;
     return;
@@ -1066,24 +1098,93 @@ function sohbetleriCiz() {
   const qutu = document.getElementById("sohbetAxini");
 
   if (veziyyet.sohbetler.length === 0) {
+    const aktivSaheAd = veziyyet.aktivSahe ? veziyyet.aktivSahe.ad : "Vergi və Mühasibatlıq";
+    const aktivSaheIkon = veziyyet.aktivSahe ? (veziyyet.aktivSahe.ikon || "💼") : "💼";
     qutu.innerHTML = `
-      <div class="mesaj-qutu assistant" style="max-width: 100%;">
-        <div class="mesaj-basliq"><span>🧠 BeyinAI Asistant</span></div>
-        <div class="mesaj-icerik">
-          <p><strong>Xoş gəldiniz!</strong> Vergi, hüquq, mühasibatlıq və şəxsi sənədlərinizi analiz etməyə hazıram.</p>
-          <ul>
-            <li>Aşağıdakı <strong>📎</strong> düyməsi və ya sol paneldən <strong>PDF, Word, Excel, CSV, WhatsApp/Telegram çatları, Səs və Şəkil</strong> əlavə edə bilərsiniz.</li>
-            <li>Sualınızı yazın və ya <strong>🎙️</strong> mikrofonla səsləndirin — cavablar rəsmi maddə istinadları, qərar matrisi və etibarlılıq göstəricisi ilə təqdim olunur.</li>
-            <li>Cavabların altındakı <strong>👍 / 🎯</strong> düymələri ilə sistemə yeni qaydalar öyrədə, <strong>📑 Sitatlar</strong> panelindən mənbələrin orijinal mətninə baxa bilərsiniz.</li>
-          </ul>
+      <div class="xos-geldin-qabi">
+        <div class="xos-geldin-ust">
+          <div class="xos-geldin-ikon">🧠</div>
+          <h2 class="xos-geldin-basliq">BeyinAI ilə necə işləmək istəyirsiniz?</h2>
+          <p class="xos-geldin-altbasliq">
+            Aktiv bilik sahəsi: <strong>${htmlQoru(aktivSaheIkon)} ${htmlQoru(aktivSaheAd)}</strong>. Suallarınızı rəsmi qanun maddələrinə əsaslanaraq cavablandırır, sənədlərinizi yoxlayır və mühasibatlıq hesablamaları aparır.
+          </p>
+        </div>
+
+        <div class="xos-geldin-kartlar">
+          <button type="button" class="baslangic-kart" data-baslangic="sual">
+            <span class="baslangic-kart-ikon">💬</span>
+            <div>
+              <div class="baslangic-kart-ad">Vergi və Hüquq Sualı Soruş</div>
+              <div class="baslangic-kart-izah">Qanun maddələri, güzəştlər, risklər və mühasibatlıq üzrə dəqiq izah alın</div>
+            </div>
+          </button>
+
+          <button type="button" class="baslangic-kart" data-baslangic="fayl">
+            <span class="baslangic-kart-ikon">📁</span>
+            <div>
+              <div class="baslangic-kart-ad">Müqavilə və ya Sənəd Yüklə</div>
+              <div class="baslangic-kart-izah">PDF, Word, Excel cədvəli və ya WhatsApp/Telegram müzakirəsini təhlil etdirin</div>
+            </div>
+          </button>
+
+          <button type="button" class="baslangic-kart" data-baslangic="haqqhesab">
+            <span class="baslangic-kart-ikon">🧮</span>
+            <div>
+              <div class="baslangic-kart-ad">Maaş və Son Haqq-Hesab Hesabla</div>
+              <div class="baslangic-kart-izah">Gross/Net əməkhaqqı, məzuniyyət kompensasiyası və çap vərəqəsi hazırlayın</div>
+            </div>
+          </button>
+
+          <button type="button" class="baslangic-kart" data-baslangic="simulyator">
+            <span class="baslangic-kart-ikon">🧬</span>
+            <div>
+              <div class="baslangic-kart-ad">Özünü-İnkişaf və Bilik Sınağı</div>
+              <div class="baslangic-kart-izah">Yeni öyrənilmiş qaydaları təsdiqləyin və praktiki məsələlərlə məşq edin</div>
+            </div>
+          </button>
+        </div>
+
+        <div class="xos-geldin-numuneler">
+          <button type="button" class="numune-sual-cip" data-numune-sual="Mikro sahibkar üçün 75% gəlir və mənfəət vergisi güzəşti hansı şərtlərlə tətbiq olunur?">
+            💡 Mikro sahibkarın 75% vergi güzəşti şərtləri
+          </button>
+          <button type="button" class="numune-sual-cip" data-numune-sual="İşdən çıxan işçinin istifadə edilməmiş məzuniyyət kompensasiyası və son haqq-hesabı necə hesablanır?">
+            💡 İşdən çıxan işçinin məzuniyyət kompensasiyası
+          </button>
+          <button type="button" class="numune-sual-cip" data-numune-sual="ƏDV-nin əvəzləşdirilməsi üçün hansı sənədlər və elektron qaimə şərtləri mütləqdir?">
+            💡 ƏDV əvəzləşdirilməsi qaydaları
+          </button>
         </div>
       </div>
     `;
+
+    qutu.querySelectorAll("[data-baslangic]").forEach(kart => {
+      kart.addEventListener("click", () => {
+        const emel = kart.getAttribute("data-baslangic");
+        if (emel === "sual") {
+          const inp = document.getElementById("sualInput");
+          if (inp) inp.focus();
+        } else if (emel === "fayl") {
+          document.getElementById("faylSecici")?.click();
+        } else if (emel === "haqqhesab") {
+          modalHaqqHesabAc();
+        } else if (emel === "simulyator") {
+          simulyatorModalAc();
+        }
+      });
+    });
+
+    qutu.querySelectorAll("[data-numune-sual]").forEach(cip => {
+      cip.addEventListener("click", () => {
+        const s = cip.getAttribute("data-numune-sual");
+        if (s) sualGonder(s);
+      });
+    });
     return;
   }
 
   qutu.innerHTML = veziyyet.sohbetler.map((m, idx) => {
-    const rolAdi = m.rol === "user" ? "👤 Siz" : "🧠 BeyinAI Agent";
+    const rolAdi = m.rol === "user" ? "👤 Siz" : "🧠 BeyinAI";
     const vaxt = m.yaradildi ? new Date(m.yaradildi).toLocaleTimeString("az-AZ", { hour: "2-digit", minute: "2-digit" }) : "";
     const sitatlar = Array.isArray(m.sitatlar) ? m.sitatlar : [];
     const dusunme = sitatlar[0]?.dusunmeAddimlari || m.dusunmeAddimlari || [];
@@ -1092,7 +1193,7 @@ function sohbetleriCiz() {
     if (m.rol === "assistant" && Array.isArray(dusunme) && dusunme.length > 0) {
       dusunmeHtml = `
         <details class="agent-dusunme-qutu">
-          <summary>🧭 Agentin Araşdırma və Analiz Addımları (${dusunme.length} mərhələ)</summary>
+          <summary>🔍 Necə araşdırıldı? (${dusunme.length} addım)</summary>
           <div class="agent-dusunme-siyahi">
             ${dusunme.map(a => `<div>${markdownFormatla(a, [])}</div>`).join("")}
           </div>
@@ -1140,17 +1241,17 @@ function sohbetleriCiz() {
     let aletlerHtml = "";
     if (m.rol === "assistant" && !m.gozleyir) {
       aletlerHtml = `
-        <div class="mesaj-hover-aletler">
-          <button type="button" class="mini-ikon-btn" data-kopyala="${idx}" title="Kopyala">📋</button>
-          <button type="button" class="mini-ikon-btn" data-oyren-tesdiq="${idx}" title="👍 Doğrudur (Təcrübə Bankına Qat)">👍</button>
-          <button type="button" class="mini-ikon-btn" data-oyren-duzelis="${idx}" title="🎯 Düzəliş Öyrət">🎯</button>
+        <div class="mesaj-etiketli-aletler">
+          <button type="button" class="mini-ikon-btn" data-kopyala="${idx}" title="Cavabın mətnini kopyala">📋 Kopyala</button>
+          <button type="button" class="mini-ikon-btn" data-oyren-tesdiq="${idx}" title="Cavab doğrudursa təcrübə yaddaşına əlavə et">👍 Düzgündür</button>
+          <button type="button" class="mini-ikon-btn" data-oyren-duzelis="${idx}" title="Səhv varsa düzgün qaydanı sistemə öyrət">✏️ Səhvi Düzəlt</button>
+          <button type="button" class="mini-ikon-btn" data-seslendir="${idx}" title="Cavabı səslə oxut">🔊 Dinlə</button>
           <div class="menu-acilan-qabi">
-            <button type="button" class="mini-ikon-btn btn-daha-cox" data-menu-toggle="${idx}" title="Daha çox seçim">•••</button>
+            <button type="button" class="mini-ikon-btn btn-daha-cox" data-menu-toggle="${idx}" title="Əlavə əməliyyatlar">•••</button>
             <div class="menu-acilan-siyahi" id="menuAletler_${idx}">
-              <button type="button" class="menu-element" data-yeniden="${idx}">🔄 Yenidən Cavabla</button>
-              <button type="button" class="menu-element" data-etrafli="${idx}">🔍 Ətraflı İzah</button>
-              <button type="button" class="menu-element" data-seslendir="${idx}">🔊 Səsləndir</button>
-              <button type="button" class="menu-element" data-endir="${idx}">📥 Hesabatı Endir (.md)</button>
+              <button type="button" class="menu-element" data-yeniden="${idx}">🔄 Yenidən cavabla</button>
+              <button type="button" class="menu-element" data-etrafli="${idx}">🔍 Daha ətraflı izah et</button>
+              <button type="button" class="menu-element" data-endir="${idx}">📥 Fayl kimi endir (.md)</button>
             </div>
           </div>
         </div>
@@ -1412,13 +1513,17 @@ async function menbeOnizlemeAc(menbeId, vurgulanacaqParcaId = null) {
   menbeleriCiz();
 
   const sagP = document.getElementById("sagPanel");
-  if (sagP) sagP.classList.remove("gizli");
+  if (sagP) {
+    sagP.classList.remove("gizli");
+    document.getElementById("btnPanelToggle")?.classList.add("aktiv");
+  }
 
   document.querySelectorAll(".sag-tab").forEach(t => t.classList.toggle("aktiv", t.getAttribute("data-tab") === "sitatTab"));
   document.querySelectorAll(".sag-tab-mezmun").forEach(c => c.classList.toggle("aktiv", c.id === "sitatTab"));
 
-  const qutu = document.getElementById("sitatTab");
-  qutu.innerHTML = `<div style="padding:20px; color:var(--metn-ikincil);">⏳ Mənbə yüklənir...</div>`;
+  const qutu = document.getElementById("sitatOnizlemeQutusu") || document.getElementById("sitatTab");
+  qutu.classList.remove("sitat-onizleme-bos");
+  qutu.innerHTML = `<div style="padding:20px; color:var(--metn-ikincil);">⏳ Sənəd mətni yüklənir...</div>`;
 
   try {
     const data = await apiSorgu(`/api/menbeler/${encodeURIComponent(menbeId)}`);
@@ -1948,15 +2053,27 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  const sualInpEl = document.getElementById("sualInput");
+  if (sualInpEl) {
+    sualInpEl.addEventListener("input", () => {
+      sualInpEl.style.height = "auto";
+      sualInpEl.style.height = Math.min(sualInpEl.scrollHeight, 140) + "px";
+    });
+  }
+
   document.getElementById("sualFormu").addEventListener("submit", e => {
     e.preventDefault();
-    sualGonder(document.getElementById("sualInput").value);
+    const v = document.getElementById("sualInput").value;
+    if (sualInpEl) sualInpEl.style.height = "auto";
+    sualGonder(v);
   });
 
   document.getElementById("sualInput").addEventListener("keydown", e => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      sualGonder(e.target.value);
+      const v = e.target.value;
+      if (sualInpEl) sualInpEl.style.height = "auto";
+      sualGonder(v);
     }
   });
 
@@ -2332,14 +2449,20 @@ document.addEventListener("DOMContentLoaded", () => {
     bildirisGoster("📋 Canlı sinxronizasiya kodu kopyalandı!");
   });
 
-  // Kitabxana və Bilik Sahələri Modalı
-  const btnKitabxana = document.getElementById("btnKitabxanaSecici");
-  if (btnKitabxana) {
-    btnKitabxana.addEventListener("click", () => {
-      kitabxanaCiz();
-      document.getElementById("modalKitabxana").hidden = false;
+  // Kitabxana və Bilik Sahələri Modalı (Həm üst paneldən, həm də sol menyudan)
+  const kitabxanaAcFn = () => {
+    kitabxanaCiz();
+    document.getElementById("modalKitabxana").hidden = false;
+  };
+  document.getElementById("btnKitabxanaSecici")?.addEventListener("click", kitabxanaAcFn);
+  document.getElementById("btnSolKitabxanaAc")?.addEventListener("click", kitabxanaAcFn);
+
+  // Özünü-İnkişaf Mərkəzi daxili tabları
+  document.querySelectorAll("[data-sim-tab]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      simTabSec(btn.getAttribute("data-sim-tab"));
     });
-  }
+  });
 
   const formYeniSahe = document.getElementById("formYeniSahe");
   if (formYeniSahe) {
