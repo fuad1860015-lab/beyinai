@@ -234,13 +234,27 @@ function bozZonaYoxlaVeDosyeAc({
   if (!acilmalidir) return null;
 
   const yekunMovzu = movzu || String(sual).slice(0, 85).trim();
-  const mufettisMovqeyi = teref_a ||
-    "Mühafizəkar (Vergi Orqanı) Mövqeyi: Qanunda birbaşa azadolma və ya xüsusi icazə göstərilmədiyi üçün əməliyyat ümumi qaydada tam vergiyə cəlb edilməli və sanksiya riski nəzərə alınmalıdır.";
-  const muhasibMovqeyi = teref_b ||
-    "Praktiki Baş Mühasib Mövqeyi: Vergi Məcəlləsinin 3.11 və 13-cü maddələrinə (bütün ziddiyyətlərin və aydın olmayan məqamların vergi ödəyicisinin xeyrinə şərh edilməsi) əsasən, iqtisadi əsaslandırılmış sənədlərlə vergi ödəyicisinin xeyrinə tətbiq edilə bilər.";
+  const secilmisSahe = sahe_id || db.aktivSaheIdAl();
+  let profil = null;
+  try {
+    profil = require("./cognition").saheProfiliTeminEt(secilmisSahe);
+  } catch (_) {}
+  const rolA = profil?.teref_a_rol || "Mühafizəkar Tənqidçi";
+  const rolB = profil?.teref_b_rol || "Praktik Mütəxəssis";
+
+  const mufettisMovqeyi = teref_a || (
+    secilmisSahe === "vergi_muhasibat"
+      ? "Mühafizəkar (Vergi Orqanı) Mövqeyi: Qanunda birbaşa azadolma və ya xüsusi icazə göstərilmədiyi üçün əməliyyat ümumi qaydada tam vergiyə cəlb edilməli və sanksiya riski nəzərə alınmalıdır."
+      : `${rolA}: Təsdiqlənmiş birbaşa norma və ya ciddi sübut olmadığı üçün ən ehtiyatlı, sıfır-riskli və mühafizəkar standart tətbiq edilməlidir.`
+  );
+  const muhasibMovqeyi = teref_b || (
+    secilmisSahe === "vergi_muhasibat"
+      ? "Praktiki Baş Mühasib Mövqeyi: Vergi Məcəlləsinin 3.11 və 13-cü maddələrinə (bütün ziddiyyətlərin və aydın olmayan məqamların vergi ödəyicisinin xeyrinə şərh edilməsi) əsasən, iqtisadi əsaslandırılmış sənədlərlə vergi ödəyicisinin xeyrinə tətbiq edilə bilər."
+      : `${rolB}: Məntiqi əsaslandırma, sənədləşdirmə və praktiki təcrübə çərçivəsində çevik və effektiv həll tətbiq edilə bilər.`
+  );
 
   return db.mubahiseliDosyeYarat({
-    sahe_id: sahe_id || db.aktivSaheIdAl(),
+    sahe_id: secilmisSahe,
     movzu: yekunMovzu,
     sual: sual || yekunMovzu,
     teref_a_mufettis: mufettisMovqeyi,

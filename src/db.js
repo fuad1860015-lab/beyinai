@@ -209,6 +209,32 @@ db.exec(`
     yaradildi INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_qanun_tesir_sahe ON qanun_tesir_hesabatlari(sahe_id);
+
+  CREATE TABLE IF NOT EXISTS sahe_profilleri (
+    sahe_id TEXT PRIMARY KEY,
+    teref_a_rol TEXT NOT NULL,
+    teref_b_rol TEXT NOT NULL,
+    hakim_rol TEXT NOT NULL,
+    eks_hucum_suali TEXT DEFAULT '',
+    helledici_deyisenler TEXT DEFAULT '[]',
+    numune_suallar TEXT DEFAULT '[]',
+    sual_ipucu TEXT DEFAULT '',
+    yaradildi INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS sahe_bacariq_xeritesi (
+    id TEXT PRIMARY KEY,
+    sahe_id TEXT NOT NULL,
+    movzu TEXT NOT NULL,
+    ugurlu_say INTEGER DEFAULT 0,
+    ugursuz_say INTEGER DEFAULT 0,
+    duzelis_sayi INTEGER DEFAULT 0,
+    son_bal INTEGER DEFAULT 75,
+    deqiqlik_faizi INTEGER DEFAULT 75,
+    seviyye TEXT DEFAULT 'orta',
+    son_yenilenme INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_bacariq_sahe ON sahe_bacariq_xeritesi(sahe_id, deqiqlik_faizi);
 `);
 
 // Sütun miqrasiyası: Köhnə bazalarda yaddas.etibar_seviyyesi və menbeler.etibar_seviyyesi yoxdursa əlavə et
@@ -1946,6 +1972,142 @@ function qanunTesirHesabatlariniAl(sahe_id = null, limit = 15) {
   }));
 }
 
+// ---- Sahə üzrə Müstəqil Düşünmə Profili və Bacarıq (Güclü/Zəif Mövzular) Xəritəsi ----
+function saheProfiliSaxla({
+  sahe_id,
+  teref_a_rol,
+  teref_b_rol,
+  hakim_rol,
+  eks_hucum_suali = "",
+  helledici_deyisenler = [],
+  numune_suallar = [],
+  sual_ipucu = ""
+}) {
+  if (!sahe_id) return null;
+  const indi = Date.now();
+  db.prepare(`
+    INSERT OR REPLACE INTO sahe_profilleri
+      (sahe_id, teref_a_rol, teref_b_rol, hakim_rol, eks_hucum_suali, helledici_deyisenler, numune_suallar, sual_ipucu, yaradildi)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    sahe_id,
+    teref_a_rol || "🔎 Sərt Risk və Səhv Tənqidçisi",
+    teref_b_rol || "🛠️ Praktik Həll Qurucusu",
+    hakim_rol || "🎯 Baş Ekspert (Yekun Qərar)",
+    eks_hucum_suali || "",
+    JSON.stringify(Array.isArray(helledici_deyisenler) ? helledici_deyisenler : []),
+    JSON.stringify(Array.isArray(numune_suallar) ? numune_suallar : []),
+    sual_ipucu || "",
+    indi
+  );
+  return saheProfiliAl(sahe_id);
+}
+
+function saheProfiliAl(sahe_id = null) {
+  const secilmis = sahe_id || aktivSaheIdAl();
+  const s = db.prepare("SELECT * FROM sahe_profilleri WHERE sahe_id = ?").get(secilmis);
+  if (!s) return null;
+  return {
+    ...s,
+    helledici_deyisenler: JSON.parse(s.helledici_deyisenler || "[]"),
+    numune_suallar: JSON.parse(s.numune_suallar || "[]")
+  };
+}
+
+function bacariqSeviyyesiHesabla(faiz, duzelisSayi = 0, sonNov = "") {
+  if (sonNov === "duzelis" || sonNov === "bosluq" || faiz < 70) return "zeif";
+  if (faiz >= 85 && duzelisSayi === 0) return "guclu";
+  if (faiz >= 88) return "guclu";
+  return "orta";
+}
+
+function bacariqQeydEt({ sahe_id = null, movzu, bal = 75, nov = "simulyasiya" }) {
+  const secilmisSahe = sahe_id || aktivSaheIdAl();
+  const temizMovzu = String(movzu || "").replace(/^[🎯✅🔍💬🔀]+\s*/, "").trim().slice(0, 95);
+  if (!temizMovzu || temizMovzu.length < 4) return null;
+
+  const indi = Date.now();
+  const movcudlar = db.prepare("SELECT * FROM sahe_bacariq_xeritesi WHERE sahe_id = ?").all(secilmisSahe);
+  const yeniNorm = azNormallashdir(temizMovzu);
+
+  let uygun = movcudlar.find(m => {
+    const mNorm = azNormallashdir(m.movzu);
+    return mNorm === yeniNorm || (yeniNorm.length > 14 && (mNorm.includes(yeniNorm.slice(0, 22)) || yeniNorm.includes(mNorm.slice(0, 22))));
+  });
+
+  const emeliyyatBali =
+    nov === "tesdiq" ? 95 :
+    nov === "duzelis" ? 40 :
+    nov === "bosluq" ? 35 :
+    Math.max(0, Math.min(100, Number(bal) || 75));
+
+  if (uygun) {
+    const ugurluArt = emeliyyatBali >= 75 ? 1 : 0;
+    const ugursuzArt = emeliyyatBali < 70 ? 1 : 0;
+    const duzelisArt = nov === "duzelis" ? 1 : 0;
+    const yeniUgurlu = (uygun.ugurlu_say || 0) + ugurluArt;
+    const yeniUgursuz = (uygun.ugursuz_say || 0) + ugursuzArt;
+    const yeniDuzelis = (uygun.duzelis_sayi || 0) + duzelisArt;
+    // Son nəticəyə 55%, əvvəlki orta səviyyəyə 45% çəki veririk ki, həm düzəlişlər, həm də məşq irəliləyişi dərhal hiss olunsun
+    const yeniFaiz = Math.max(20, Math.min(100, Math.round(uygun.deqiqlik_faizi * 0.45 + emeliyyatBali * 0.55)));
+    const yeniSeviyye = bacariqSeviyyesiHesabla(yeniFaiz, yeniDuzelis, nov === "simulyasiya" && emeliyyatBali >= 80 ? "" : nov);
+
+    db.prepare(`
+      UPDATE sahe_bacariq_xeritesi
+      SET ugurlu_say = ?, ugursuz_say = ?, duzelis_sayi = ?, son_bal = ?, deqiqlik_faizi = ?, seviyye = ?, son_yenilenme = ?
+      WHERE id = ?
+    `).run(yeniUgurlu, yeniUgursuz, yeniDuzelis, emeliyyatBali, yeniFaiz, yeniSeviyye, indi, uygun.id);
+
+    return db.prepare("SELECT * FROM sahe_bacariq_xeritesi WHERE id = ?").get(uygun.id);
+  }
+
+  const id = "komp-" + crypto.randomUUID().slice(0, 8);
+  const ugurlu = emeliyyatBali >= 75 ? 1 : 0;
+  const ugursuz = emeliyyatBali < 70 ? 1 : 0;
+  const duzelis = nov === "duzelis" ? 1 : 0;
+  const seviyye = bacariqSeviyyesiHesabla(emeliyyatBali, duzelis, nov);
+
+  db.prepare(`
+    INSERT INTO sahe_bacariq_xeritesi
+      (id, sahe_id, movzu, ugurlu_say, ugursuz_say, duzelis_sayi, son_bal, deqiqlik_faizi, seviyye, son_yenilenme)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, secilmisSahe, temizMovzu, ugurlu, ugursuz, duzelis, emeliyyatBali, emeliyyatBali, seviyye, indi);
+
+  return db.prepare("SELECT * FROM sahe_bacariq_xeritesi WHERE id = ?").get(id);
+}
+
+function bacariqXeritesiniAl(sahe_id = null) {
+  const secilmisSahe = sahe_id || aktivSaheIdAl();
+  const siyahi = db.prepare(`
+    SELECT * FROM sahe_bacariq_xeritesi
+    WHERE sahe_id = ?
+    ORDER BY deqiqlik_faizi ASC, son_yenilenme DESC
+  `).all(secilmisSahe);
+
+  const zeifSay = siyahi.filter(x => x.seviyye === "zeif").length;
+  const ortaSay = siyahi.filter(x => x.seviyye === "orta").length;
+  const gucluSay = siyahi.filter(x => x.seviyye === "guclu").length;
+  const ortaDeqiqlik = siyahi.length > 0
+    ? Math.round(siyahi.reduce((c, x) => c + (x.deqiqlik_faizi || 0), 0) / siyahi.length)
+    : 0;
+
+  return {
+    sahe_id: secilmisSahe,
+    movzular: siyahi,
+    xulase: { cemi: siyahi.length, zeifSay, ortaSay, gucluSay, ortaDeqiqlik }
+  };
+}
+
+function zeifMovzulariAl(sahe_id = null, limit = 5) {
+  const secilmisSahe = sahe_id || aktivSaheIdAl();
+  return db.prepare(`
+    SELECT * FROM sahe_bacariq_xeritesi
+    WHERE sahe_id = ? AND (seviyye = 'zeif' OR deqiqlik_faizi < 78)
+    ORDER BY deqiqlik_faizi ASC, duzelis_sayi DESC, son_yenilenme DESC
+    LIMIT ?
+  `).all(secilmisSahe, limit);
+}
+
 function yaddasRedakteEt(id, { kateqoriya, metn }) {
   if (!id || !metn || !metn.trim()) return null;
   const temiz = metn.trim();
@@ -2238,6 +2400,11 @@ module.exports = {
   mubahiseliDosyeQerarVer,
   maddelereBagliYaddaslariArxivle,
   qanunTesirHesabatlariniAl,
+  saheProfiliSaxla,
+  saheProfiliAl,
+  bacariqQeydEt,
+  bacariqXeritesiniAl,
+  zeifMovzulariAl,
   praktikaKeysElaveEt,
   bilikBosluguQeydEt,
   bilikBosluqlariniAl,

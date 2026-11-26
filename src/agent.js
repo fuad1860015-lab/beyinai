@@ -9,6 +9,7 @@ const db = require("./db");
 const ai = require("./ai");
 const geminiFiles = require("./gemini-files");
 const evolution = require("./evolution");
+const cognition = require("./cognition");
 
 // Canlı NotebookLM Brauzer Körpüsü növbəsi (Extension qoşulduqda sualları canlı olaraq notebooklm.google.com-a da yönləndirə bilir)
 const nlmSorguNovbesi = [];
@@ -843,6 +844,21 @@ async function agentSualCavabla({
     ? sexsiYaddas.map(y => `- [${y.kateqoriya.toUpperCase()}] ${y.metn}`).join("\n")
     : "Hələ xüsusi yaddaş qeydi yoxdur.";
 
+  // Universal Müstəqil Düşünmə: Sahəyə uyğun Tənqidçi rollar + Yarımçıq sualda Qərar Ağacı analizi
+  const { profil: saheProfili, konsiliumPromptu } = cognition.saheyeUygunKonsiliumTelimatiQur(secilmisSaheId);
+  const yarimciqAnaliz = !/^SINAQ SİMULYASİYASI:/i.test(sual)
+    ? cognition.yarimciqSualAnalizEt({ sual, saheId: secilmisSaheId })
+    : { yarimciqdir: false, promptTelimati: "", lokalQerarAgaciBloku: "" };
+
+  dusunmeAddimlari.push(
+    `🥊 Sahə Əks-Hücum Tənqidçisi: **${saheProfili.teref_a_rol}** vs **${saheProfili.teref_b_rol}** (${saheProfili.hakim_rol}).`
+  );
+  if (yarimciqAnaliz.yarimciqdir) {
+    dusunmeAddimlari.push(
+      `🧭 Müstəqil Dəqiqləşdirmə: Yarımçıq məlumat aşkarlandı — **"Əgər şərt A → X, şərt B → Y" Qərar Ağacı** və dəqiqləşdirici sual qurulur.`
+    );
+  }
+
   const sistemPromptu = `${tenz.sistem_telimati || "Sən istifadəçinin yüksək intellektli Şəxsi AI Agentisən (Gemini / Claude / ChatGPT və NotebookLM hibridi)."}
 
 SƏNİN ROLUN VƏ DƏRİN ANALİTİK METODOLOGİYAN:
@@ -879,12 +895,9 @@ SƏNİN ROLUN VƏ DƏRİN ANALİTİK METODOLOGİYAN:
    - Qaydaya əməl edilmədikdə tətbiq olunan maliyyə sanksiyasını, cərimə faizlərini və vergi yoxlaması risklərini dəqiq maddə ilə göstər.
    #### 💡 4. Proaktiv Ekspert Təklifi və Strateji Addım:
    - İstifadəçinin soruşmadığı, lakin biznes və vergi baxımından kritik olan **YALNIZ 100% QANUNİ** optimizasiya, sənədləşmə və ya cərimədən qorunma addımını təklif et (məsələn: qanuni azadolma şərtləri, müqavilə bəndi, portalda düzgün bəyanetmə). **QƏTİ QADAĞA:** Heç vaxt geri tarixlə sənəd/müqavilə dəyişdirməyi, ödənişi süni şəkildə aylara bölməyi və ya vergidən/cərimədən qanunsuz yayınma yollarını təklif etmə!
-   #### ⚖️ 5. Çox-Baxışlı Ekspert Konsiliumu (Müfəttiş vs Baş Mühasib Debatı):
-   - 👮‍♂️ **Mühafizəkar Vergi Müfəttişi Yanaşması:** [Audit riski, qanunun ən sərt mətni, kameral yoxlama və cərimə sanksiyası riski].
-   - 💼 **Təcrübəli Baş Mühasib Yanaşması:** [Qanuni müdafiə, optimizasiya, xərcin əsaslandırılması, portal və məhkəmə təcrübəsi].
-   - 🎯 **Balanslaşdırılmış Qızıl Qərar:** [Cərimədən qoruyan və biznesi riskə atmayan ən doğru çıxış yolu].
+${konsiliumPromptu}
    - **DİL TƏMİZLİYİ:** Yalnız saf və ədəbi Azərbaycan dilində yaz — türkcə sözlər ("yoksa", "fakat", "ancak", "çünkü", "göre" və s.) qətiyyən istifadə etmə!
-   </DETALLI_ANALIZ>
+   </DETALLI_ANALIZ>${yarimciqAnaliz.promptTelimati}
 
    HİSSƏ 3 (Mövzunu dərinləşdirən 2-3 ağıllı növbəti sual — <NOVBETI_SUALLAR> teqləri daxilində):
    <NOVBETI_SUALLAR>
@@ -949,6 +962,18 @@ ${sual}${yenidenBloku}`;
   const ehtiyatImtina = xamCavab && xamCavab.length < 150 && /(?:məlumatım\s*yoxdur|cavab\s*verə\s*bilmirəm|sorry|cannot\s*assist|i\s*don't\s*have\s*information)/i.test(xamCavab);
   if (!xamCavab || ((sitatlar.length > 0 || uygunQizilQaydalar.length > 0) && ehtiyatImtina)) {
     xamCavab = ai.lokalAnalitikCavabQur(sual, sitatlar, uygunQizilQaydalar, ziddiyyetQeydi);
+  }
+
+  // Yarımçıq sual aşkar edilibsə və cavabın görünən hissəsində hələ Qərar Ağacı yoxdursa, mütləq əlavə et!
+  if (yarimciqAnaliz.yarimciqdir && yarimciqAnaliz.lokalQerarAgaciBloku) {
+    const gorunenHisse = String(xamCavab || "").split(/<DETALLI_ANALIZ>/i)[0] || "";
+    if (!/Qərar Ağacı|Əgər\s+/i.test(gorunenHisse)) {
+      if (/<DETALLI_ANALIZ>/i.test(xamCavab)) {
+        xamCavab = xamCavab.replace(/<DETALLI_ANALIZ>/i, `${yarimciqAnaliz.lokalQerarAgaciBloku}\n\n<DETALLI_ANALIZ>`);
+      } else {
+        xamCavab += yarimciqAnaliz.lokalQerarAgaciBloku;
+      }
+    }
   }
 
   const mufettis = cavabiMufettisIleDogrula(xamCavab, sitatlar, uygunQizilQaydalar, ziddiyyetQeydi);
@@ -1026,6 +1051,14 @@ ${sual}${yenidenBloku}`;
     // Söhbəti gecikdirmədən arxa planda İyerarxik Araşdırmanı işə sal (simulyasiya sorğusu deyilsə)
     if (!/^SINAQ SİMULYASİYASI:/i.test(sual)) {
       try {
+        db.bacariqQeydEt({
+          sahe_id: secilmisSaheId,
+          movzu: sual.slice(0, 70),
+          bal: 35,
+          nov: "bosluq"
+        });
+      } catch (_) {}
+      try {
         const webResearcher = require("./web-researcher");
         webResearcher.bosluguIyerarxikArasdir({
           bosluqId: qeydBosluq?.id || null,
@@ -1100,6 +1133,8 @@ ${sual}${yenidenBloku}`;
     etibarliliqKod,
     qanunVePraktikaVar,
     criticPass,
+    yarimciqAnaliz,
+    saheProfili,
     notebooklmFaylSayi: geminiFileParts.length
   };
 }

@@ -10,6 +10,7 @@ const db = require("./db");
 const simulator = require("./simulator");
 const connectors = require("./connectors");
 const webResearcher = require("./web-researcher");
+const cognition = require("./cognition");
 
 // ---- Tədqiqat Tezliyi İntrvalları (Milli-saniyə ilə) ----
 const TEZLIK_INTERVAL_MS = {
@@ -142,8 +143,19 @@ async function avtoTedqiqatDovresiCalisdir({ mecburidir = false, fetchFn = null 
     });
   }
 
-  // PRİORİTET 2: Canlı mühasib çatlarında (Telegram/WhatsApp) yeni mübahisəli sual varsa, onu araşdır!
-  const canliCatNamized = !iyerarxikArasdirma ? simulator.canliCatlardanMubahiseliKeysCixar(aktivSahe) : null;
+  // PRİORİTET 2: Sahənin Bacarıq Xəritəsində zəif (seviyye='zeif') mövzu varsa, hədəfli olaraq məhz həmin zəif mövzunu məşq et!
+  cognition.bacariqXeritesiniSinxronEt(aktivSahe);
+  const zeifMovzular = !iyerarxikArasdirma ? db.zeifMovzulariAl(aktivSahe, 3).filter(m => m.seviyye === "zeif") : [];
+  if (zeifMovzular.length > 0) {
+    icraOlunanPrioritet = "2_zeif_movzu_mesqi";
+    simNetice = await simulator.simulyasiyaIcraEt({
+      dinamikNov: "zeif_movzu",
+      saheId: aktivSahe
+    });
+  }
+
+  // PRİORİTET 3: Canlı çatlarda (Telegram/WhatsApp) yeni mübahisəli sual varsa, onu araşdır!
+  const canliCatNamized = (!iyerarxikArasdirma && !simNetice) ? simulator.canliCatlardanMubahiseliKeysCixar(aktivSahe) : null;
   if (canliCatNamized) {
     icraOlunanPrioritet = "2_canli_cat_mubahisesi";
     simNetice = await simulator.simulyasiyaIcraEt({
@@ -199,7 +211,12 @@ async function avtoTedqiqatDovresiCalisdir({ mecburidir = false, fetchFn = null 
       ]);
     }
   } else if (simNetice) {
-    const pEtiket = icraOlunanPrioritet === "2_canli_cat_mubahisesi" ? "Prioritet 2 (Canlı Çat)" : "Prioritet 3 (Çarpaz Sınaq)";
+    const pEtiket =
+      icraOlunanPrioritet === "2_zeif_movzu_mesqi"
+        ? "Hədəfli Zəif Mövzu Məşqi"
+        : icraOlunanPrioritet === "2_canli_cat_mubahisesi"
+          ? "Prioritet 2 (Canlı Çat)"
+          : "Prioritet 3 (Çarpaz Sınaq)";
     basliq = `${pEtiket}: ${simNetice.basliq} (${simNetice.bal}% Bal)`;
     const dersMetnleri = (simNetice.dersler || []).join("\n• ");
     metn = `🎯 **Sınaq Keysi:** ${simNetice.basliq}\n📊 **Müvəffəqiyyət Balı:** ${simNetice.bal}/100 (${simNetice.ugurlu_mu ? "Uğurlu" : "Çatışmazlıq Aşkarlandı"})\n\n💡 **Öyrənilmiş Dərslər:**\n• ${dersMetnleri || "Normativ qaydalar təsdiqləndi."}`;

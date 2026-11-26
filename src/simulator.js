@@ -11,6 +11,7 @@ const agent = require("./agent");
 const ai = require("./ai");
 const evolution = require("./evolution");
 const webResearcher = require("./web-researcher");
+const cognition = require("./cognition");
 
 // ---- Standart Praktiki Sınaq Keysləri Bankı ----
 const STANDART_SSENARILER = [
@@ -97,13 +98,21 @@ const STANDART_SSENARILER = [
 
 function ssenarileriAl(saheId = null) {
   if (saheId && saheId !== "all") {
-    return STANDART_SSENARILER.filter(s => s.sahe_id === saheId);
+    const uygun = STANDART_SSENARILER.filter(s => s.sahe_id === saheId);
+    if (uygun.length > 0) return uygun;
+    return cognition.saheUcunDinamikSsenarilerAl(saheId);
   }
   return STANDART_SSENARILER;
 }
 
-function ssenariTap(id) {
-  return STANDART_SSENARILER.find(s => s.id === id) || null;
+function ssenariTap(id, saheId = null) {
+  const tap = STANDART_SSENARILER.find(s => s.id === id);
+  if (tap) return tap;
+  if (id && String(id).startsWith("sim-dyn-")) {
+    const hedefSahe = saheId || db.aktivSaheIdAl();
+    return cognition.saheUcunDinamikSsenarilerAl(hedefSahe).find(s => s.id === id) || null;
+  }
+  return null;
 }
 
 /**
@@ -303,16 +312,19 @@ async function simulyasiyaIcraEt({ ssenariId = null, customSsenari = null, dinam
   let ssenariObj = null;
 
   if (ssenariId) {
-    ssenariObj = ssenariTap(ssenariId);
+    ssenariObj = ssenariTap(ssenariId, aktivSahe);
   } else if (customSsenari && customSsenari.ssenari) {
     ssenariObj = {
       id: "sim-custom-" + Date.now(),
       sahe_id: customSsenari.sahe_id || aktivSahe,
+      hedef_movzu: customSsenari.hedef_movzu || "",
       basliq: customSsenari.basliq || "Xüsusi Sınaq Keysi",
       ssenari: customSsenari.ssenari,
       gozlenilenMaddeler: customSsenari.gozlenilenMaddeler || [],
       kritikMeqamlar: customSsenari.kritikMeqamlar || []
     };
+  } else if (dinamikNov === "zeif_movzu") {
+    ssenariObj = cognition.zeifMovzudanSinaqYarat(aktivSahe);
   } else if (dinamikNov === "canli_cat") {
     ssenariObj = canliCatlardanMubahiseliKeysCixar(aktivSahe) || carpazMaddelerdenDinamikKeysYarat(aktivSahe);
   } else if (dinamikNov === "carpaz_madde") {
@@ -377,13 +389,19 @@ async function simulyasiyaIcraEt({ ssenariId = null, customSsenari = null, dinam
     } catch (_) {}
   }
 
-  // Sahə mövzularına da mövzunu qeyd et
+  // Sahə mövzularına və Bacarıq (Güclü/Zəif Mövzular) Xəritəsinə nəticəni qeyd et
   db.saheMovzuElaveEt({
     sahe_id: hedefSahe,
-    movzu: ssenariObj.basliq,
+    movzu: ssenariObj.hedef_movzu || ssenariObj.basliq,
     status: "oyrenilib",
     detal: `Sınaq simulyasiyası ilə yoxlanıldı (Bal: ${qiymet.bal}%)`,
     menbe_sayi: menbeIdleri.length || 1
+  });
+  const bacariqQeydi = db.bacariqQeydEt({
+    sahe_id: hedefSahe,
+    movzu: ssenariObj.hedef_movzu || ssenariObj.basliq,
+    bal: qiymet.bal,
+    nov: "simulyasiya"
   });
 
   // Əgər açıq bilik boşluqlarından bu mövzuya aid olan vardısa, həll edildi kimi qeyd et
@@ -411,6 +429,7 @@ async function simulyasiyaIcraEt({ ssenariId = null, customSsenari = null, dinam
     ...qeyd,
     saxlanilanDersler,
     yeniDusunmeQaydasi,
+    bacariqQeydi,
     tapilmisMaddeler: qiymet.tapilmisMaddeler,
     catismayanMaddeler: qiymet.catismayanMaddeler,
     dusunmeAddimlari: agentCavab.dusunmeAddimlari || []
