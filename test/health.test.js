@@ -630,6 +630,27 @@ async function test(ad, fn) {
     }
   });
 
+  await test("29. Niyyət Təyini, Salamlaşma Qorunması və RAG Relevanlıq Baryeri", async () => {
+    const agent = require("../src/agent");
+
+    // 1) Salamlaşma sualı hüquqi cərimə maddəsi ilə cavablanmamalıdır
+    const salamRes = await agent.agentSualCavabla({
+      sual: "Salam, necəsən? Özünü təqdim et.",
+      sohbetdeSaxla: false
+    });
+    assert.strictEqual(salamRes.cavab.model, "BeyinAI Universal Köməkçi");
+    assert.ok(salamRes.cavab.metn.includes("Universal Şəxsi AI Asistantınız"), "Salamlaşma cavabı universal köməkçi təqdimatı olmalıdır");
+    assert.ok(!salamRes.cavab.metn.includes("Maddə 49"), "Salamlaşmaya vergi cəriməsi çıxarılmamalıdır");
+    assert.strictEqual(salamRes.sitatlar.length, 0, "Salamlaşmada heç bir baza sitatı olmamalıdır");
+
+    // 2) Kənar mövzulu sual (Python) əlaqəsiz vergi götürülməsi maddələrini sitat gətirməməlidir
+    const kənarRes = await agent.agentSualCavabla({
+      sual: "Mənə Python-da funksiya nümunəsi yaz",
+      sohbetdeSaxla: false
+    });
+    assert.ok(!kənarRes.cavab.metn.includes("Maddə 43"), "Kənar suala əlaqəsiz Maddə 43 əlavə edilməməlidir");
+  });
+
   console.log(`\n======================================================`);
   console.log(`📊 TEST NƏTİCƏSİ: ${kecen} keçdi, ${ugursuz} uğursuz`);
   console.log(`======================================================\n`);
