@@ -519,18 +519,18 @@ async function test(ad, fn) {
     if (testGap?.id) db.db.prepare("DELETE FROM bilik_bosluqlari WHERE id = ?").run(testGap.id);
   });
 
-  await test("25. Uçdan-Uca Canlı HTTP Server İnteqrasiyası (Bootstrap, Təkamül API, UI v4.0)", async () => {
+  await test("25. Uçdan-Uca Canlı HTTP Server İnteqrasiyası (Bootstrap, Təkamül API, UI v5.0)", async () => {
     const { server } = require("../server");
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const port = server.address().port;
     const bazaUrl = `http://127.0.0.1:${port}`;
 
     try {
-      // 1) Ana səhifə və v4.0 UI aktivliyi
+      // 1) Ana səhifə və v5.0 UI aktivliyi
       const htmlRes = await fetch(`${bazaUrl}/`);
       const html = await htmlRes.text();
       assert.strictEqual(htmlRes.status, 200);
-      assert.ok(html.includes("tekamulQaralamalarQabi") && html.includes("app.js?v=4.0"), "Yeni v4.0 Özünü-İnkişaf UI panelləri yüklənməlidir");
+      assert.ok(html.includes("tekamulQaralamalarQabi") && html.includes("app.js?v=5.0"), "Yeni v5.0 UI panelləri yüklənməlidir");
 
       // 2) /api/bootstrap bütöv inteqrasiya cavabı
       const bootRes = await fetch(`${bazaUrl}/api/bootstrap`);
