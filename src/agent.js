@@ -156,12 +156,14 @@ async function agentAxtarisPlaniQur(sual, aktivMenbeler = [], tenz = null, sonIs
   let effektifSual = sual;
 
   // Çox-Addımlı Dialoq Yaddaşı (Follow-up / Coreference Resolution):
-  // Əgər sual "Bəs...", "Onun...", "Bu halda...", "Həmin..." ilə başlayırsa və ya qısa davam sualıdırsa, əvvəlki sualın mövzusunu cari sualla birləşdir!
-  if (sonIstifadeciSuali && sonIstifadeciSuali !== sual) {
+  // Yalnız aydın davam bildirən kəlmələr ("Bəs...", "Onun...", "Bu halda...", "Həmin...", "Bəs bu necə?") olduqda əvvəlki sualın mövzusunu cari sualla birləşdir!
+  const dialoqSualidir = /^(?:salam|salam\s*aleykum|sabahınız\s*xeyir|hər\s*vaxtınız\s*xeyir|axşamınız\s*xeyir|necəsən|nətərsən|kimsən|özünü\s*təqdim|sağ\s*ol|təşəkkür|minnətdaram|çox\s*sağ\s*ol|hi|hello)\b/i.test(sual.trim());
+
+  if (sonIstifadeciSuali && sonIstifadeciSuali !== sual && !dialoqSualidir) {
     const davamSualidir =
-      /^(?:bəs|bes|və\s+bəs|onda|bu\s+halda|bəs\s+bu|bəs\s+onun|onun|onların|həmin|orada|buna\s+görə|belə\s+olduqda|yaxşı\s+bəs)\b/i.test(sual.trim()) ||
-      /\b(?:həmin\s+halda|bu\s+halda|onun\s+üçün|həmin\s+maddə|yuxarıdakı)\b/i.test(sual) ||
-      (sual.length < 68 && !/maddə\s*\d/i.test(sual) && db.sozKokleri(sual).length <= 4);
+      /^(?:bəs|bes|və\s+bəs|onda|bu\s+halda|bəs\s+bu|bəs\s+onun|onun|onların|həmin|orada|buna\s+görə|belə\s+olduqda|yaxşı\s+bəs|bunun)\b/i.test(sual.trim()) ||
+      /\b(?:həmin\s+halda|bu\s+halda|onun\s+üçün|həmin\s+maddə|yuxarıdakı|bu\s+zaman|o\s+zaman)\b/i.test(sual) ||
+      (/\b(?:istisna|cəriməsi|məsuliyyəti|müddəti|faizi|şərti)\b/i.test(sual) && sual.length < 50);
 
     if (davamSualidir) {
       const evvelkiMaddeler = Array.from(
@@ -619,6 +621,48 @@ async function agentSualCavabla({
     dusunmeAddimlari.push(`📚 Kitabxana Rəfi: **${cariSahe.ad}** (${cariSahe.esas_mi ? "Əsas İstiqamət" : "Əlaqəli Sahə"}) üzrə axtarış və sintez aparılır.`);
   }
 
+  // 1a) Ağıllı Niyyət Süzgəci: Salamlaşma, Özünü-Təqdimat və Ümumi Söhbət
+  const sualKicik = db.azKicilt(sual.trim()).replace(/[!?.,;:]+$/g, "").trim();
+  const salamdir = /^(?:salam|salam\s*aleykum|sabahınız\s*xeyir|hər\s*vaxtınız\s*xeyir|axşamınız\s*xeyir|günaydın|privet|hi|hello)\b/i.test(sualKicik);
+  const ozunuTeqdimdir = /^(?:özünü\s*təqdim\s*et|kimsən|sən\s*kimsən|nə\s*işə\s*yarayırsan|nə\s*bacarırsan|haqqında\s*məlumat|kömək\s*et)\b/i.test(sualKicik) ||
+    /^(?:salam[,\s]+)?(?:necəsən|özünü\s*təqdim\s*et)\b/i.test(sualKicik);
+  const tesekkurdir = /^(?:təşəkkür|təşəkkür\s*edirəm|çox\s*sağ\s*ol|sağ\s*ol|minnətdaram|təşəkkürlər)\b/i.test(sualKicik);
+  const saheAcarSozVar = /vergi|məcəllə|mühasib|maddə|bəyannamə|qaimə|faiz|cərimə|ədv|gəlir|icarə|xaric|idxal|dividend|maaş|əmək|ödəniş|dövr|kassa|nağd|pos|hesabat|hesab|kod|funksiya/i.test(sualKicik);
+
+  if ((salamdir || ozunuTeqdimdir || tesekkurdir) && !saheAcarSozVar && sual.length <= 60) {
+    let cavabMetni = "";
+    if (tesekkurdir) {
+      cavabMetni = `Dəyməz, xoşdur! Əlavə bir sualınız və ya araşdırmaq istədiyiniz məsələ olarsa, buyurun, hər zaman kömək etməyə hazıram.`;
+    } else {
+      const saheAd = cariSahe ? cariSahe.ad : "Vergi və Mühasibatlıq";
+      cavabMetni = `Salam! Mən sizin **Universal Şəxsi AI Asistantınız və İkinci Beyninizəm (BeyinAI)**.
+
+Sizə aşağıdakı əsas istiqamətlərdə peşəkar kömək edə bilərəm:
+- 💼 **${saheAd}**: Qanunvericilik normaları, bəyannamələr, e-qaimələr, vergi riskləri və optimallaşdırma
+- ⚖️ **Müstəqil Tənqid və Konsilium**: Sərt tənqidçi və təcrübəli mütəxəssis baxışlarını çarpazlaşdıraraq riskləri aşkarlamaq
+- 🔀 **Qərar Ağacları**: Şərtlərdən asılı mürəkkəb məsələlərdə (Əgər Şərt A → X, Əgər Şərt B → Y) aydın yol xəritəsi qurmaq
+- 📚 **Sənədlərin Analizi**: Sol paneldən yüklədiyiniz PDF, Word, Excel və qeydləri dərindən oxuyub dəqiq istinadlarla cavablandırmaq
+
+Mövzu ilə bağlı sualınızı və ya situasiyanı yazın, dərhal araşdıraq!`;
+    }
+
+    if (sohbetdeSaxla) {
+      db.sohbetElaveEt({ rol: "user", metn: sual, qovluq_id, sahe_id: secilmisSaheId });
+      db.sohbetElaveEt({ rol: "assistant", metn: cavabMetni, qovluq_id, sahe_id: secilmisSaheId });
+    }
+
+    return {
+      cavab: {
+        metn: cavabMetni,
+        model: "BeyinAI Universal Köməkçi",
+        istifadeEdilenParcaSayi: 0
+      },
+      sitatlar: [],
+      dusunme_addimlari: ["👋 İstifadəçi salamlaşması və ya ümumi dialoq təyin edildi, birbaşa köməkçi cavabı verildi."],
+      sahe_id: secilmisSaheId
+    };
+  }
+
   // 1) Birbaşa yaddaş əmri və ya İstifadəçi Ekspert Düzəlişi (Active Learning Loop) varmı?
   const tarixce = db.sohbetleriAl(qovluq_id, 6, secilmisSaheId);
   const sonIstifadeciSuali = [...tarixce].reverse().find(m => m.rol === "user")?.metn || "";
@@ -738,9 +782,22 @@ async function agentSualCavabla({
 
   // Kassa çeki (NKA çeki) sualında "Kassa metodu (Maddə 130–133)" kimi tam başqa mövzunun sitatlarını süz
   const isKassaCekiSuali = /kassa\s*çeki|kassa\s*ceki|nka\s*çeki|nka\s*ceki/i.test(sual) && !/kassa\s*metod/i.test(sual);
-  const sonParcalar = isKassaCekiSuali
+  let sonParcalar = isKassaCekiSuali
     ? tapilanParcalar.filter(p => !/Maddə\s*13[0-3]\b|kassa\s*metodu/i.test(`${p.basliq || ""} ${(p.metn || "").slice(0, 220)}`))
     : tapilanParcalar;
+
+  // Semantik və Açar Söz Uyğunluğu Süzgəci:
+  // Əgər sual daxili qanunvericilik və ya bazadakı sənəd mövzusu deyilsə (məs: Python, proqramlaşdırma, ümumi məsələ),
+  // bazadan təsadüfi tək sözlə tutulmuş aşağı ballı parçaları hüquqi sitat kimi daxil etmə!
+  const qanunAcarSozleri = /vergi|məcəllə|mühasib|maddə|bəyannamə|qaimə|faiz|cərimə|ədv|gəlir|icarə|xaric|idxal|dividend|maaş|əmək|ödəniş|dövr|kassa|nağd|pos|sanksiya|akt|yoxlama|hesabat|hesab|kalkulyator/i;
+  const sualdaQanunKontekstiVar = qanunAcarSozleri.test(sual);
+
+  if (!sualdaQanunKontekstiVar && sonParcalar.length > 0) {
+    sonParcalar = sonParcalar.filter(p => (p.xam_bal || 0) >= 28);
+    if (sonParcalar.length === 0) {
+      dusunmeAddimlari.push(`ℹ️ Relevanlıq Süzgəci: Sual daxili sənədlərdən kənar mövzudur, əlaqəsiz baza sitatları süzüldü.`);
+    }
+  }
 
   // Sitatları nömrələ və hüquqi dərəcəsini əlavə et
   const sitatlar = sonParcalar.map((p, idx) => {
@@ -962,6 +1019,10 @@ ${sual}${yenidenBloku}`;
   const ehtiyatImtina = xamCavab && xamCavab.length < 150 && /(?:məlumatım\s*yoxdur|cavab\s*verə\s*bilmirəm|sorry|cannot\s*assist|i\s*don't\s*have\s*information)/i.test(xamCavab);
   if (!xamCavab || ((sitatlar.length > 0 || uygunQizilQaydalar.length > 0) && ehtiyatImtina)) {
     xamCavab = ai.lokalAnalitikCavabQur(sual, sitatlar, uygunQizilQaydalar, ziddiyyetQeydi);
+    if (sonMelumat.xeta) {
+      const xetaQeydi = `> ⚠️ **AI Provayder Xəbərdarlığı:** ${sonMelumat.xeta}. Cavab daxili baza qaydaları əsasında quruldu. Tam süni intellekt analizi üçün yuxarı sağdakı ⚙️ **Tənzimləmələr** bölməsindən keçərli Google Gemini (\`AIzaSy...\`) və ya Groq (\`gsk_...\`) API açarı daxil edin.\n\n`;
+      xamCavab = xetaQeydi + xamCavab;
+    }
   }
 
   // Yarımçıq sual aşkar edilibsə və cavabın görünən hissəsində hələ Qərar Ağacı yoxdursa, mütləq əlavə et!

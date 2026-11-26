@@ -330,6 +330,17 @@ function yarimciqSualAnalizEt({ sual = "", saheId = null }) {
   const sozSayi = temiz.split(/\s+/).filter(Boolean).length;
   const kicik = db.azKicilt(temiz);
 
+  // Salamlaşma, təşəkkür və ya ümumi dialoqdursa, qətiyyən yarımçıq sahə sualı sayma!
+  const dialoqdur = /^(?:salam|salam\s*aleykum|sabahınız\s*xeyir|hər\s*vaxtınız\s*xeyir|axşamınız\s*xeyir|necəsən|nətərsən|kimsən|özünü\s*təqdim|sağ\s*ol|təşəkkür|minnətdaram|çox\s*sağ\s*ol|hi|hello)\b/i.test(kicik);
+  if (dialoqdur && sozSayi <= 8) {
+    return {
+      yarimciqdir: false,
+      catismayanDeyisenler: [],
+      promptTelimati: "",
+      lokalQerarAgaciBloku: ""
+    };
+  }
+
   // Sualda artıq konkret detallar verilibmi?
   const konkretDetalSayi = [
     /\b\d+\s*(?:azn|manat|usd|%|faiz|gün|ay|il|işçi|nəfər|gb|ms|req)/i.test(temiz),
@@ -343,9 +354,13 @@ function yarimciqSualAnalizEt({ sual = "", saheId = null }) {
   const coxVariantliMovzudur =
     /nə\s*qədər\s*vergi|hansı\s*vergi|vergi\s*var|vergi\s*tutulur|necə\s*hesablan|hansı\s*halda|olarmı|icazə\s*var|hansı\s*daha\s*yaxşı|necə\s*seç|nə\s*etməli|məsləhət|cəriməsi\s*nədir/i.test(kicik);
 
+  // Sahəyə və ya qaydaya aid mövzu ipucu varmı?
+  const saheMovzusuVar =
+    /vergi|məcəllə|mühasib|maddə|bəyannamə|qaimə|faiz|cərimə|ədv|gəlir|icarə|xaric|idxal|dividend|maaş|əmək|ödəniş|dövr|kassa|nağd|pos|şərt|qayda|qanun|hüquq|biznes|kod|server|baza|proqram/i.test(kicik);
+
   const yarimciqdir =
-    (sozSayi <= 9 && konkretDetalSayi <= 1) ||
-    (coxVariantliMovzudur && konkretDetalSayi === 0 && sozSayi <= 16);
+    (saheMovzusuVar && sozSayi >= 2 && sozSayi <= 10 && konkretDetalSayi === 0) ||
+    (coxVariantliMovzudur && konkretDetalSayi <= 1 && sozSayi <= 18);
 
   if (!yarimciqdir) {
     return {
