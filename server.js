@@ -17,6 +17,7 @@ const scheduler = require("./src/scheduler");
 const payroll = require("./src/payroll");
 const evolution = require("./src/evolution");
 const webResearcher = require("./src/web-researcher");
+const cognition = require("./src/cognition");
 
 const PORT = Number(process.env.PORT) || 3847;
 const HOST = process.env.HOST || "0.0.0.0";
@@ -245,6 +246,8 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         saheler: db.saheleriAl(),
         aktiv_sahe: db.aktivSaheAl(),
+        aktiv_sahe_profili: cognition.saheProfiliTeminEt(sahe_id),
+        bacariq_xeritesi: cognition.bacariqXeritesiniSinxronEt(sahe_id),
         sahe_movzulari: db.saheMovzulariAl(sahe_id),
         simulyasiya_statistika: db.simulyasiyaStatistikaAl(sahe_id),
         simulyasiya_ssenariler: simulator.ssenarileriAl(sahe_id),
@@ -286,7 +289,15 @@ const server = http.createServer(async (req, res) => {
       const b = await govdeOxu(req);
       if (!b.ad || !b.ad.trim()) return jsonCavab(res, 400, { ok: false, xeta: "Sahə adı boş ola bilməz." });
       const yeni = db.saheYarat(b);
-      return jsonCavab(res, 200, { ok: true, sahe: yeni, saheler: db.saheleriAl() });
+      const profil = await cognition.yeniSaheniAvtoQurasdir(yeni, { llmIstifadeEt: b.llmIstifadeEt !== false });
+      return jsonCavab(res, 200, {
+        ok: true,
+        sahe: yeni,
+        profil,
+        saheler: db.saheleriAl(),
+        dusunme_qaydalari: db.dusunmeQaydalariniAl(yeni.id),
+        bacariq_xeritesi: cognition.bacariqXeritesiniSinxronEt(yeni.id)
+      });
     }
 
     if (yol === "/api/saheler/aktiv" && req.method === "POST") {
@@ -296,6 +307,8 @@ const server = http.createServer(async (req, res) => {
       return jsonCavab(res, 200, {
         ok: true,
         aktiv_sahe: deyisdi,
+        aktiv_sahe_profili: cognition.saheProfiliTeminEt(b.sahe_id),
+        bacariq_xeritesi: cognition.bacariqXeritesiniSinxronEt(b.sahe_id),
         saheler: db.saheleriAl(),
         sahe_movzulari: db.saheMovzulariAl(b.sahe_id),
         menbeler: db.menbeleriAl("all", b.sahe_id)
@@ -349,6 +362,7 @@ const server = http.createServer(async (req, res) => {
           ok: true,
           netice,
           statistika: db.simulyasiyaStatistikaAl(saheId),
+          bacariq_xeritesi: cognition.bacariqXeritesiniSinxronEt(saheId),
           yaddas: db.yaddaslariAl(saheId),
           sahe_movzulari: db.saheMovzulariAl(saheId)
         });
@@ -426,11 +440,13 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    // 1f. BeyinAI Özünü-İnkişaf və Təkamül Mühərriki (v2.0) API-ləri
+    // 1f. BeyinAI Özünü-İnkişaf və Təkamül Mühərriki (v2.0 + v3.0 Bacarıq Xəritəsi) API-ləri
     if (yol === "/api/tekamul/veziyyet" && req.method === "GET") {
       const saheId = urlObj.searchParams.get("sahe_id") || db.aktivSaheIdAl();
       return jsonCavab(res, 200, {
         ok: true,
+        aktiv_sahe_profili: cognition.saheProfiliTeminEt(saheId),
+        bacariq_xeritesi: cognition.bacariqXeritesiniSinxronEt(saheId),
         qaralamalar: db.qaralamaYaddaslariAl(saheId),
         arxiv_yaddaslar: db.arxivYaddaslariAl(saheId),
         dusunme_qaydalari: db.dusunmeQaydalariniAl(saheId),
@@ -504,6 +520,7 @@ const server = http.createServer(async (req, res) => {
           ok: true,
           netice,
           statistika: db.simulyasiyaStatistikaAl(saheId),
+          bacariq_xeritesi: cognition.bacariqXeritesiniSinxronEt(saheId),
           qaralamalar: db.qaralamaYaddaslariAl(saheId),
           dusunme_qaydalari: db.dusunmeQaydalariniAl(saheId),
           yaddas: db.yaddaslariAl(saheId)
@@ -1020,10 +1037,18 @@ const server = http.createServer(async (req, res) => {
             duzgunIzah: duzelis.trim()
           });
         } catch (_) {}
+        try {
+          db.bacariqQeydEt({
+            movzu: (sual || duzelis).slice(0, 80),
+            bal: 40,
+            nov: "duzelis"
+          });
+        } catch (_) {}
         return jsonCavab(res, 200, {
           ok: true,
           yaddas: db.yaddaslariAl(),
           dusunme_qaydalari: db.dusunmeQaydalariniAl(),
+          bacariq_xeritesi: cognition.bacariqXeritesiniSinxronEt(),
           yeni_dusunme_qaydasi: yeniDusunmeQaydasi,
           qovluqlar: db.qovluqlariAl(),
           statistika: db.statistikaAl(),
@@ -1032,7 +1057,16 @@ const server = http.createServer(async (req, res) => {
         });
       }
 
-      // nov === "tesdiq" (Cavabı etalon keys kimi Mühasibatlıq Praktikası və Təcrübə Bankına əlavə et)
+      // nov === "tesdiq" (Cavabı etalon keys kimi Təcrübə Bankına əlavə et və Bacarıq Xəritəsində gücləndir)
+      try {
+        if (sual) {
+          db.bacariqQeydEt({
+            movzu: sual.slice(0, 80),
+            bal: 95,
+            nov: "tesdiq"
+          });
+        }
+      } catch (_) {}
       const qisaHisse = String(cavab || "")
         .split(/<DETALLI_ANALIZ>/i)[0]
         .replace(/###\s*📌?\s*Konkret və Qısa Cavab:?/i, "")
