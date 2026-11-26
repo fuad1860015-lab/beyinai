@@ -519,18 +519,18 @@ async function test(ad, fn) {
     if (testGap?.id) db.db.prepare("DELETE FROM bilik_bosluqlari WHERE id = ?").run(testGap.id);
   });
 
-  await test("25. Uçdan-Uca Canlı HTTP Server İnteqrasiyası (Bootstrap, Təkamül API, UI v5.0)", async () => {
+  await test("25. Uçdan-Uca Canlı HTTP Server İnteqrasiyası (Bootstrap, Təkamül API, UI v5.1)", async () => {
     const { server } = require("../server");
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const port = server.address().port;
     const bazaUrl = `http://127.0.0.1:${port}`;
 
     try {
-      // 1) Ana səhifə və v5.0 UI aktivliyi
+      // 1) Ana səhifə və v5.1 UI aktivliyi
       const htmlRes = await fetch(`${bazaUrl}/`);
       const html = await htmlRes.text();
       assert.strictEqual(htmlRes.status, 200);
-      assert.ok(html.includes("tekamulQaralamalarQabi") && html.includes("app.js?v=5.0"), "Yeni v5.0 UI panelləri yüklənməlidir");
+      assert.ok(html.includes("bacariqXeritesiQabi") && html.includes("app.js?v=5.1"), "Yeni v5.1 UI panelləri yüklənməlidir");
 
       // 2) /api/bootstrap bütöv inteqrasiya cavabı
       const bootRes = await fetch(`${bazaUrl}/api/bootstrap`);
@@ -539,6 +539,8 @@ async function test(ad, fn) {
       assert.ok(Array.isArray(boot.qaralamalar), "Bootstrap qaralamalar siyahısını qaytarmalıdır");
       assert.ok(Array.isArray(boot.dusunme_qaydalari), "Bootstrap düşünmə qaydalarını qaytarmalıdır");
       assert.ok(Array.isArray(boot.mubahiseli_dosyeler), "Bootstrap boz zona dosyelərini qaytarmalıdır");
+      assert.ok(boot.aktiv_sahe_profili && boot.aktiv_sahe_profili.teref_a_rol, "Bootstrap aktiv sahənin tənqidçi profilini qaytarmalıdır");
+      assert.ok(boot.bacariq_xeritesi && Array.isArray(boot.bacariq_xeritesi.movzular), "Bootstrap bacarıq xəritəsini qaytarmalıdır");
 
       // 3) /api/tekamul/veziyyet API marşrutu
       const tekRes = await fetch(`${bazaUrl}/api/tekamul/veziyyet?sahe_id=vergi_muhasibat`);
@@ -549,6 +551,82 @@ async function test(ad, fn) {
       if (typeof server.closeAllConnections === "function") server.closeAllConnections();
       await new Promise(resolve => server.close(resolve));
       await new Promise(resolve => setTimeout(resolve, 50));
+    }
+  });
+
+  await test("26. Universal Sahə Avto-Qurucusu və Sahəyə Uyğun Əks-Hücum Tənqidçisi", async () => {
+    const cognition = require("../src/cognition");
+    const simulator = require("../src/simulator");
+
+    const kod = "test_proqram_" + Date.now();
+    const yeniSahe = db.saheYarat({
+      ad: "Proqramlaşdırma və Sistem Arxitekturası " + Date.now(),
+      kod,
+      aciqlama: "Backend server, verilənlər bazası və API təhlükəsizliyi",
+      ikon: "💻"
+    });
+
+    try {
+      const profil = await cognition.yeniSaheniAvtoQurasdir(yeniSahe, { llmIstifadeEt: false });
+      assert.ok(profil && profil.teref_a_rol.includes("Təhlükəsizlik"), "Proqramlaşdırma sahəsi üçün uyğun Əks-Hücum Tənqidçisi qurulmalıdır");
+      assert.ok(profil.teref_b_rol.includes("Memar"), "Proqramlaşdırma sahəsi üçün Sistem Memarı rolu qurulmalıdır");
+      assert.ok(profil.helledici_deyisenler.length >= 2, "Sahənin həlledici dəyişənləri avtomatik təyin olunmalıdır");
+
+      const qaydalar = db.dusunmeQaydalariniAl(yeniSahe.id);
+      assert.ok(qaydalar.length >= 1, "Yeni sahə üçün ilkin yoxlama alqoritmi avtomatik yaradılmalıdır");
+
+      const ssenariler = simulator.ssenarileriAl(yeniSahe.id);
+      assert.ok(ssenariler.length >= 2, "Yeni sahə üçün dinamik sınaq ssenariləri hazır olmalıdır");
+    } finally {
+      db.db.prepare("DELETE FROM sahe_profilleri WHERE sahe_id = ?").run(yeniSahe.id);
+      db.db.prepare("DELETE FROM sahe_bacariq_xeritesi WHERE sahe_id = ?").run(yeniSahe.id);
+      db.db.prepare("DELETE FROM dusunme_qaydalari WHERE sahe_id = ?").run(yeniSahe.id);
+      db.db.prepare("DELETE FROM sahe_movzulari WHERE sahe_id = ?").run(yeniSahe.id);
+      db.db.prepare("DELETE FROM saheler WHERE id = ?").run(yeniSahe.id);
+    }
+  });
+
+  await test("27. Yarımçıq Sual Analizi və 'Əgər Şərt A → X, Şərt B → Y' Qərar Ağacı", () => {
+    const cognition = require("../src/cognition");
+
+    // 1) Yarımçıq sual detektoru (həm vergi, həm də ümumi sahədə)
+    const icareAnaliz = cognition.yarimciqSualAnalizEt({
+      sual: "İcarə müqaviləsindən nə qədər vergi tutulur?",
+      saheId: "vergi_muhasibat"
+    });
+    assert.strictEqual(icareAnaliz.yarimciqdir, true, "Subyekti göstərilməyən yarımçıq icarə sualı aşkarlanmalıdır");
+    assert.ok(icareAnaliz.lokalQerarAgaciBloku.includes("Qərar Ağacı") && icareAnaliz.lokalQerarAgaciBloku.includes("Əgər"), "Qərar ağacı bloku qurulmalıdır");
+    assert.ok(icareAnaliz.lokalQerarAgaciBloku.includes("Dəqiqləşdirici Sual"), "Dəqiqləşdirici sual göstərilməlidir");
+
+    // 2) Tam detallı sualda lazımsız yarımçıq rejimi açmamalıdır
+    const tamAnaliz = cognition.yarimciqSualAnalizEt({
+      sual: "ƏDV ödəyicisi olan MMC VÖEN-siz fiziki şəxsdən aylıq 1500 AZN qeyri-yaşayış sahəsi icarəyə götürdükdə Maddə 124 üzrə nə qədər ÖMV tutur?",
+      saheId: "vergi_muhasibat"
+    });
+    assert.strictEqual(tamAnaliz.yarimciqdir, false, "Bütün detalları verilmiş sual yarımçıq sayılmamalıdır");
+  });
+
+  await test("28. 'Harada Güclüyəm / Zəifəm' Bacarıq Xəritəsi və Hədəfli Zəif Mövzu Məşqi", () => {
+    const cognition = require("../src/cognition");
+
+    const testMovzu = "__TEST_ZEIF_MOVZU_TRANSFER_QIYMETI__";
+    try {
+      const qeyd = db.bacariqQeydEt({
+        sahe_id: "vergi_muhasibat",
+        movzu: testMovzu,
+        bal: 40,
+        nov: "duzelis"
+      });
+      assert.strictEqual(qeyd.seviyye, "zeif", "Ekspert düzəlişi edilən mövzu 'zeif' kimi işarələnməlidir");
+
+      const zeifler = db.zeifMovzulariAl("vergi_muhasibat", 5);
+      assert.ok(zeifler.some(z => z.id === qeyd.id), "Zəif mövzular siyahısına düşməlidir");
+
+      const sinaq = cognition.zeifMovzudanSinaqYarat("vergi_muhasibat");
+      assert.strictEqual(sinaq.nov, "zeif_movzu", "Zəif mövzudan hədəfli sınaq yaranmalıdır");
+      assert.ok(sinaq.basliq.includes("Zəif Mövzu Məşqi"), "Sınaq başlığı hədəfli məşqi göstərməlidir");
+    } finally {
+      db.db.prepare("DELETE FROM sahe_bacariq_xeritesi WHERE movzu LIKE '__TEST_ZEIF_%'").run();
     }
   });
 
