@@ -325,12 +325,13 @@ async function simulyasiyaIcraEt({ ssenariId = null, customSsenari = null, dinam
 
   const hedefSahe = ssenariObj.sahe_id || aktivSahe;
 
-  // Agent ilə sualı dərindən araşdırıb cavab alırıq
+  // Agent ilə sualı dərindən araşdırıb cavab alırıq (əsas söhbət ekranını çirkləndirmədən!)
   const agentCavab = await agent.agentSualCavabla({
     sual: `SINAQ SİMULYASİYASI:\n${ssenariObj.basliq}\n\nKonkret Keys:\n${ssenariObj.ssenari}\n\nZəhmət olmasa bu keysi qanunvericilik normaları, müvafiq maddələr, rəqəmlər və praktiki addımlarla tam təhlil et.`,
     sahe_id: hedefSahe,
     qovluq_id: "all",
-    derin_rejim: true
+    derin_rejim: true,
+    sohbetdeSaxla: false
   });
 
   const cavabMetni = typeof agentCavab.cavab === "object" ? (agentCavab.cavab?.metn || "") : String(agentCavab.cavab || "");

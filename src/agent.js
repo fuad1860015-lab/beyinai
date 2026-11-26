@@ -596,7 +596,8 @@ async function agentSualCavabla({
   derin_rejim = null,
   konsilium_rejim = null,
   yenidenArasdir = false,
-  evvelkiCavab = ""
+  evvelkiCavab = "",
+  sohbetdeSaxla = true
 }) {
   const baslangicVaxt = Date.now();
   const tenz = db.tenzimlemeleriAl();
@@ -945,7 +946,8 @@ ${sual}${yenidenBloku}`;
     dusunmeAddimlari.push(`💭 Daxili Analitik Mühakimə (Chain-of-Thought): *${qisaDusunce}${sonMelumat.daxiliDusunce.length > 420 ? "..." : ""}*`);
   }
 
-  if (!xamCavab) {
+  const ehtiyatImtina = xamCavab && xamCavab.length < 150 && /(?:məlumatım\s*yoxdur|cavab\s*verə\s*bilmirəm|sorry|cannot\s*assist|i\s*don't\s*have\s*information)/i.test(xamCavab);
+  if (!xamCavab || ((sitatlar.length > 0 || uygunQizilQaydalar.length > 0) && ehtiyatImtina)) {
     xamCavab = ai.lokalAnalitikCavabQur(sual, sitatlar, uygunQizilQaydalar, ziddiyyetQeydi);
   }
 
@@ -1065,15 +1067,28 @@ ${sual}${yenidenBloku}`;
     } catch (_) {}
   }
 
-  db.sohbetElaveEt({ qovluq_id, sahe_id: secilmisSaheId, rol: "user", metn: sual, sitatlar: [] });
-  const saxlanilanCavab = db.sohbetElaveEt({
-    qovluq_id,
-    sahe_id: secilmisSaheId,
-    rol: "assistant",
-    metn: temizCavab,
-    // dusunmeAddimlari-ni yalnız 1-ci sitat obyektində saxla ki, baza 12x şişməsin
-    sitatlar: sitatlar.map((s, idx) => (idx === 0 ? { ...s, dusunmeAddimlari } : s))
-  });
+  let saxlanilanCavab;
+  if (sohbetdeSaxla) {
+    db.sohbetElaveEt({ qovluq_id, sahe_id: secilmisSaheId, rol: "user", metn: sual, sitatlar: [] });
+    saxlanilanCavab = db.sohbetElaveEt({
+      qovluq_id,
+      sahe_id: secilmisSaheId,
+      rol: "assistant",
+      metn: temizCavab,
+      // dusunmeAddimlari-ni yalnız 1-ci sitat obyektində saxla ki, baza 12x şişməsin
+      sitatlar: sitatlar.map((s, idx) => (idx === 0 ? { ...s, dusunmeAddimlari } : s))
+    });
+  } else {
+    saxlanilanCavab = {
+      id: "sim-msg-" + Date.now(),
+      qovluq_id,
+      sahe_id: secilmisSaheId,
+      rol: "assistant",
+      metn: temizCavab,
+      sitatlar,
+      yaradildi: Date.now()
+    };
+  }
 
   return {
     cavab: saxlanilanCavab,

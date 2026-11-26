@@ -405,6 +405,11 @@ function ilkinBazaHazirla() {
     yadSilStmt.run(yid);
   }
 
+  // Arxa plan sınaqlarından əsas söhbət ekranına düşmüş köhnə SINAQ SİMULYASİYASI qeydlərini təmizlə
+  try {
+    db.exec("DELETE FROM sohbetler WHERE metn LIKE 'SINAQ SİMULYASİYASI:%' OR metn = 'Üzr istəyirəm, amma bu mövzu barədə məlumatım yoxdur.';");
+  } catch (_) {}
+
   // Mövcud qanun parçalarının başlıqlarına içindəki alt-bənd nömrələrini (məs: [Bənd: 102.1.29–102.1.30-1]) avtomatik əlavə et
   const maddeParcalari = db.prepare("SELECT id, basliq, metn FROM parcalar WHERE basliq LIKE 'Maddə %' AND basliq NOT LIKE '%[Bənd:%'").all();
   if (maddeParcalari.length > 0) {
