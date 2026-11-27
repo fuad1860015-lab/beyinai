@@ -1026,7 +1026,7 @@ ${sual}${yenidenBloku}`;
   if (!xamCavab || ((sitatlar.length > 0 || uygunQizilQaydalar.length > 0) && ehtiyatImtina)) {
     xamCavab = ai.lokalAnalitikCavabQur(sual, sitatlar, uygunQizilQaydalar, ziddiyyetQeydi);
     if (sonMelumat.xeta) {
-      const xetaQeydi = `> ⚠️ **AI Provayder Xəbərdarlığı:** ${sonMelumat.xeta}. Cavab daxili baza qaydaları əsasında quruldu. Tam süni intellekt analizi üçün yuxarı sağdakı ⚙️ **Tənzimləmələr** bölməsindən keçərli Google Gemini (\`AIzaSy...\`) və ya Groq (\`gsk_...\`) API açarı daxil edin.\n\n`;
+      const xetaQeydi = `> ⚠️ **AI Provayder Xəbərdarlığı:** ${sonMelumat.xeta}. Cavab daxili baza qaydaları əsasında quruldu. Tam süni intellekt analizi üçün yuxarı sağdakı ⚙️ **Tənzimləmələr** bölməsindən aktiv Google Gemini (\`AQ...\` və ya \`AIzaSy...\`) və ya Groq (\`gsk_...\`) API açarı daxil edin.\n\n`;
       xamCavab = xetaQeydi + xamCavab;
     }
   }
