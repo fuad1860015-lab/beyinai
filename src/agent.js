@@ -99,8 +99,14 @@ const DOMEN_SINONIMLERI = [
     acar: /cərimə|cerime|sanksiya|maliyyə\s*sanksiya|gecikmə\s*faiz/i,
     elave: "Maddə 57 58 59 maliyyə sanksiyası 40 manat 50 faiz cərimə məbləği 0.1 faiz"
   },
+  // Kassa çeki / NKA çeki ilə malların alınması və xərcə salınması (Maddə 109.8, 50.8, 2% limiti)
+  {
+    acar: /(?:kassa|nka)\s*çek[iü]?.*(?:xərc|mənfəət|gəlirdən|bəyannamə|yazıl|salın|alınan|mal)|(?:xərc|mənfəət|gəlirdən|bəyannamə|yazıl|salın|alınan|mal).*(?:kassa|nka)\s*çek[iü]?|kassa\s*çeki/i,
+    elave: "Maddə 109.8 nəzarət kassa aparatının çeki NKA çeki 2 faiz gəlirdən çıxılan xərclər alış aktı Maddə 50.8 gəlirdən çıxılmayan xərclər"
+  },
   {
     acar: /qaimə|qaime|elektron\s*qaimə|\beqf\b/i,
+    istisna: /qaimə\s*ilə\s*yox|qaimə\s*yox|qaimə\s*deyil|qaiməsiz|qaimə\s*olmadan/i,
     elave: "Maddə 71-1 175 176 elektron qaimə-faktura verilmə müddəti 5 gün təsdiqi əvəzləşdirmə Maddə 58.13"
   },
   {

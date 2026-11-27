@@ -1433,7 +1433,9 @@ const UMUMI_DOMEN_SOZLERI = new Set([
   "aylıq", "ayliq", "illik", "gəlir", "gelir", "məbləğ", "mebleg", "hüquq", "huquq",
   "şərt", "sert", "qayda", "əməliyyat", "emeliyyat", "hesabat", "dövr", "dovr",
   "xərc", "xerc", "xərclər", "xercler", "ödəniş", "odenis", "şirkət", "sirket",
-  "mənfəət", "menfeet", "bəyannamə", "beyanname", "sənəd", "sened"
+  "mənfəət", "menfeet", "bəyannamə", "beyanname", "sənəd", "sened",
+  "qaimə", "qaime", "mal", "mallar", "xidmət", "xidmet", "işlər", "isler",
+  "alış", "alis", "satış", "satis", "hesab", "faktura", "alınan", "alinan"
 ]);
 
 /**
@@ -1487,7 +1489,21 @@ function aktualYaddaslariAl(sorgu = "", limit = 15, sahe_id = null) {
     return { siyahi: butun.filter(y => y.status !== "arxiv_dovr").slice(0, limit), uygunQizilQaydalar: [] };
   }
 
-  const kokler = sozKokleri(sorgu);
+  const kicikSorgu = azKicilt(sorgu);
+  // İnkar edilmiş sözləri aşkar et ("qaimə ilə yox", "qaiməsiz", "qaimə deyil")
+  const inkarSozler = new Set();
+  const inkarFrazalar = kicikSorgu.match(/([a-zçəğıöşü]+)\s+(?:ilə\s+yox|yox|deyil|olmadan|olmasa)/gi) || [];
+  for (const f of inkarFrazalar) {
+    const ilk = f.split(/\s+/)[0];
+    if (ilk && ilk.length >= 3) inkarSozler.add(ilk);
+  }
+  const sizFrazalar = kicikSorgu.match(/([a-zçəğıöşü]{3,})(?:siz|suz|sız|süz)\b/gi) || [];
+  for (const f of sizFrazalar) {
+    const kok = f.replace(/(?:siz|suz|sız|süz)$/i, "");
+    if (kok.length >= 3) inkarSozler.add(kok);
+  }
+
+  const kokler = sozKokleri(sorgu).filter(k => !inkarSozler.has(k.kok) && !inkarSozler.has(k.tam));
   const spesifikKokSayi = kokler.filter(k => !UMUMI_DOMEN_SOZLERI.has(k.kok) && !UMUMI_DOMEN_SOZLERI.has(k.tam)).length;
   const sorguMaddeler = metndenMaddeleriCixar(sorgu);
   const kecmisDovrSorgusu = /\b(201\d|202[0-5]|keçmiş|əvvəlki|köhnə\s*redaksiya|ötən\s*il)\b/i.test(sorgu);
@@ -1544,6 +1560,10 @@ function aktualYaddaslariAl(sorgu = "", limit = 15, sahe_id = null) {
   const uygunQizilQaydalar = qiymetli.filter(y => {
     if (y.menbe === "Sistem Qaydası") return false;
     if (y.status === "arxiv_dovr" && !kecmisDovrSorgusu) return false;
+    const yAz = azKicilt(y.metn || "");
+    for (const ink of inkarSozler) {
+      if (yAz.includes(ink)) return false;
+    }
     if (y._maddeUygun > 0) return true;
     if (y._spesifikUygun >= 2) return true;
     if (spesifikKokSayi === 1 && y._spesifikUygun === 1 && y._umumiUygun >= 1) return true;

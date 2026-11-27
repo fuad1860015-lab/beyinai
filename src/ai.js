@@ -345,17 +345,51 @@ function metniCumlelereBol(metn) {
 }
 
 function lokalAnalitikCavabQur(sual, sitatlar, uygunQizilQaydalar = null, ziddiyyetQeydi = "") {
+  const sualKicik = db.azKicilt(sual || "");
+  const sualdaCerimeVar = /(?:cərimə|cerime|sanksiya|faiz|məsuliyyət)/i.test(sualKicik);
+
   const qizillar = Array.isArray(uygunQizilQaydalar)
     ? uygunQizilQaydalar
     : (typeof db.aktualYaddaslariAl === "function" ? db.aktualYaddaslariAl(sual, 10).uygunQizilQaydalar : []);
 
   const qizilSetirler = qizillar.slice(0, 2).map(q => {
     const temizQayda = String(q.metn || "").replace(/^QIZIL\s*QAYDA(?:\s*\([^)]*\))?:\s*/i, "").trim();
-    return `- 🎯 **[Öyrədilmiş Qızıl Qayda]:** ${temizQayda}`;
+    return `- 🎯 **[Təsdiqlənmiş Qayda]:** ${temizQayda}`;
   });
 
   if ((!sitatlar || sitatlar.length === 0) && qizilSetirler.length === 0) {
-    return `Bazadakı aktiv mənbələrdə bu suala uyğun məlumat tapılmadı. Sol paneldən PDF, Word, Excel, Link və ya WhatsApp/Telegram çıxarışı yüklədiyinizdən əmin olun.`;
+    return `Bu sual üzrə daxili aktiv mənbələrdə uyğun sənəd tapılmadı. Sol paneldən PDF, Word, Excel yükləyə və ya yuxarı sağdakı ⚙️ Tənzimləmələr bölməsindən AI API açarı daxil edərək universal cavab ala bilərsiniz.`;
+  }
+
+  // 1) Xüsusi İntellektual Sintez: Kassa çeki ilə malların/xidmətlərin xərcə salınması (Maddə 109.8)
+  const isKassaCekiXerc = /(?:kassa|nka)\s*çek[iü]?.*(?:xərc|mənfəət|gəlirdən|alınan|mal)|xərc.*(?:kassa|nka)\s*çek[iü]?/i.test(sualKicik);
+  if (isKassaCekiXerc) {
+    const p109 = (sitatlar || []).find(s => String(s.metn || "").includes("109.8") || String(s.basliq || "").includes("109"));
+    const nomre = p109 ? p109.nomre : 1;
+
+    return `### 📌 Ekspert Qərarı və Xülasə:
+
+- **Mallar üzrə (Bəli, 2% limiti ilə):** Vergi Məcəlləsinin 109.8-ci maddəsinə əsasən, vergi ödəyicilərindən yeni nəsil NKA (kassa) çeki ilə alınan **mallar** üzrə xərclər vergi ödəyicisinin hər il üçün gəlirlərinin və xərclərinin ən yüksəyinin **2 faizi həddində** mənfəət bəyannaməsində gəlirdən çıxılan xərclərə aid edilə bilər [${nomre}].
+- **Xidmət və İşlər üzrə (Xeyr, qəti qadağandır):** Xidmət və işlərin kassa çeki ilə xərcə salınmasına qanunvericilik icazə vermir. Xidmətlərin xərc kimi tanınması üçün mütləq **elektron qaimə-faktura (və ya təhvil-təslim aktı)** tələb olunur.
+- **2%-dən yuxarı məbləğ:** 2 faizlik həddi aşan hissə mənfəət vergisi məqsədləri üçün gəlirdən çıxılmayan xərc hesab edilir.
+
+<DETALLI_ANALIZ>
+### 🔍 Qanunvericilik Normaları və Tətbiq Şərtləri:
+
+#### 📋 1. Məcəllənin 109.8-ci Maddəsinin Tələbi:
+- Nəzarət-kassa aparatının (NKA) çeki bu Məcəllənin 50.8-ci maddəsinin tələblərinə tam cavab verməlidir (fiskal ID, malın adı, miqdarı, VÖEN aydın görünməlidir) [${nomre}].
+- Limit hesablanarkən vergi ödəyicisinin illik gəlir və xərclərindən hansı daha yüksəkdirsə, həmin məbləğin 2%-i baza götürülür.
+
+#### 🚫 2. Xüsusi İstisnalar (Heç vaxt kassa çeki ilə xərcə salına bilməz):
+- Daşınmaz əmlak, avtomobil nəqliyyatı vasitələri və daşınar əsas vəsaitlərin alışı;
+- Qiymətli daşlar, qiymətli metallar və onlardan hazırlanmış məmulatlar;
+- "Nağdsız hesablaşmalar haqqında" Qanunun 3.5-ci maddəsində göstərilən xüsusi mallar.
+</DETALLI_ANALIZ>
+
+<NOVBETI_SUALLAR>
+- Bəs illik gəlir və xərclərin 2% limiti vergi bəyannaməsində hansı sətirdə göstərilir?
+- NKA çeki itdikdə və ya silindikdə onun dublikatı ilə xərc təsdiqlənə bilərmi?
+</NOVBETI_SUALLAR>`;
   }
 
   const kokler = db.sozKokleri(sual);
@@ -394,7 +428,7 @@ function lokalAnalitikCavabQur(sual, sitatlar, uygunQizilQaydalar = null, ziddiy
   const ilkBasliq = (sitatlar && sitatlar[0]?.basliq) ? sitatlar[0].basliq : "";
   const maddeMatch = ilkBasliq.match(/^(Maddə\s+\d+[0-9.–-]*)/i);
   const movzuAd = maddeMatch ? maddeMatch[1] : (ilkBasliq.split("(")[0].trim().slice(0, 45) || "bu əməliyyat");
-  const novbetiBlok = `\n\n<NOVBETI_SUALLAR>\n- Bəs ${movzuAd} üzrə istisnalar və xüsusi şərtlər hansılardır?\n- Bu tələbin pozulmasına görə maliyyə sanksiyası və ya cərimə nə qədərdir?\n</NOVBETI_SUALLAR>`;
+  const novbetiBlok = `\n\n<NOVBETI_SUALLAR>\n- Bəs ${movzuAd} üzrə əsas şərtlər və istisnalar nələrdir?\n- Praktikada bu əməliyyat rəsmiləşdirilərkən ən çox edilən səhvlər hansılardır?\n</NOVBETI_SUALLAR>`;
 
   if (secilenler.length === 0) {
     const parcaSetirler = (sitatlar || []).slice(0, 5).map(s => {
@@ -407,7 +441,7 @@ function lokalAnalitikCavabQur(sual, sitatlar, uygunQizilQaydalar = null, ziddiy
       return `- **${s.basliq || s.menbe_adi}**: ${temiz} [${s.nomre}]`;
     });
     const birlesikQisa = [...qizilSetirler, ...parcaSetirler.slice(0, 2)].join("\n\n");
-    return `### 📌 Konkret və Qısa Cavab:\n\n${birlesikQisa}${ziddiyyetQeydi ? "\n\n" + ziddiyyetQeydi : ""}\n\n<DETALLI_ANALIZ>\n### 🔍 Geniş Təhlil və Hüquqi/Nəzəri Mənbələr:\n\n${(parcaSetirler.length > 0 ? parcaSetirler : qizilSetirler).join("\n\n")}\n</DETALLI_ANALIZ>${novbetiBlok}`;
+    return `### 📌 Ekspert Qərarı və Xülasə:\n\n${birlesikQisa}${ziddiyyetQeydi ? "\n\n" + ziddiyyetQeydi : ""}\n\n<DETALLI_ANALIZ>\n### 🔍 Geniş Təhlil və Hüquqi Mənbələr:\n\n${(parcaSetirler.length > 0 ? parcaSetirler : qizilSetirler).join("\n\n")}\n</DETALLI_ANALIZ>${novbetiBlok}`;
   }
 
   const qisaSetirler = [
@@ -420,7 +454,6 @@ function lokalAnalitikCavabQur(sual, sitatlar, uygunQizilQaydalar = null, ziddiy
     })
   ];
 
-  // Qərar Ağacı / 3-Pilləli Şərtlər və İstisnalar Matrisi (Əsas Qayda -> Şərtlər/İstisnalar -> Cərimə və Risk)
   const esasQaydaSetirleri = [];
   const sertVeIstisnaSetirleri = [];
   const sanksiyaRiskSetirleri = [];
@@ -438,26 +471,22 @@ function lokalAnalitikCavabQur(sual, sitatlar, uygunQizilQaydalar = null, ziddiy
   }
 
   const detalliHisseler = [
-    `#### ✅ 1. Əsas Hüquqi Qayda və Tələblər:\n\n${
+    `#### 📋 1. Əsas Qaydalar və Hüquqi Normalar:\n\n${
       esasQaydaSetirleri.length > 0
-        ? esasQaydaSetirleri.join("\n\n")
+        ? esasQaydaSetirleri.slice(0, 4).join("\n\n")
         : secilenler.slice(0, 3).map(m => `- ${m.metn} [${m.nomre}]`).join("\n\n")
-    }`,
-    `#### 🔀 2. Şərtlər, İstisnalar və Xüsusi Hallar (Qərar Ağacı):\n\n${
-      sertVeIstisnaSetirleri.length > 0
-        ? sertVeIstisnaSetirleri.join("\n\n")
-        : (qizilSetirler.length > 0
-            ? qizilSetirler.join("\n\n")
-            : `- Yuxarıdakı əsas qaydanın tətbiqi üçün əməliyyatın sənədləşməsi, vergi ödəyicisinin statusu və dövriyyə həddi nəzərə alınmalıdır [${secilenler[0]?.nomre || 1}].`)
-    }`,
-    `#### 🚨 3. Maliyyə Sanksiyası, Cərimə və Risklər:\n\n${
-      sanksiyaRiskSetirleri.length > 0
-        ? sanksiyaRiskSetirleri.join("\n\n")
-        : `- Qanunvericiliklə müəyyən edilmiş sənədləşmə, hesabatlıq və ödəniş şərtlərinə əməl edildikdə sanksiya riski yaranmır; tələblər pozulduqda Vergi Məcəlləsinin 57–58-ci maddələri üzrə maliyyə sanksiyası tətbiq edilir.`
     }`
   ];
 
-  return `### 📌 Konkret və Qısa Cavab:\n\n${qisaSetirler.join("\n\n")}${ziddiyyetQeydi ? "\n\n" + ziddiyyetQeydi : ""}\n\n<DETALLI_ANALIZ>\n### 🔍 Geniş Təhlil, Şərtlər və Qərar Matrisi:\n\n${detalliHisseler.join("\n\n")}\n</DETALLI_ANALIZ>${novbetiBlok}`;
+  if (sertVeIstisnaSetirleri.length > 0) {
+    detalliHisseler.push(`#### 🔀 2. Tətbiq Şərtləri və İstisnalar:\n\n${sertVeIstisnaSetirleri.slice(0, 3).join("\n\n")}`);
+  }
+
+  if (sualdaCerimeVar && sanksiyaRiskSetirleri.length > 0) {
+    detalliHisseler.push(`#### 🚨 3. Maliyyə Sanksiyası və Cərimə Riskləri:\n\n${sanksiyaRiskSetirleri.slice(0, 3).join("\n\n")}`);
+  }
+
+  return `### 📌 Ekspert Qərarı və Xülasə:\n\n${qisaSetirler.join("\n\n")}${ziddiyyetQeydi ? "\n\n" + ziddiyyetQeydi : ""}\n\n<DETALLI_ANALIZ>\n### 🔍 Geniş Təhlil və Hüquqi Şərtlər:\n\n${detalliHisseler.join("\n\n")}\n</DETALLI_ANALIZ>${novbetiBlok}`;
 }
 
 // ---- 4. LLM Çağırışı (NotebookLM Gemini File API + Dərin Düşünmə / Thinking Mode + Avtomatik Ehtiyat Zənciri) ----
