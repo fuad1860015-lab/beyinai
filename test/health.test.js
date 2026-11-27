@@ -651,6 +651,24 @@ async function test(ad, fn) {
     assert.ok(!kənarRes.cavab.metn.includes("Maddə 43"), "Kənar suala əlaqəsiz Maddə 43 əlavə edilməməlidir");
   });
 
+  await test("30. İnkar Frazaları (qaimə ilə yox), NKA Çeki (Maddə 109.8) və Təbii İntellektual Sintez", async () => {
+    const agent = require("../src/agent");
+
+    const res = await agent.agentSualCavabla({
+      sual: "qaimə ilə yox, kassa çeki ilə alınan mal, xidmət mənfəət bəyannaməsində xərcə yazıla bilərmi, hansı şərtlərlə, hansı məbləğdə",
+      sohbetdeSaxla: false
+    });
+
+    // 1) İnkar edilən qaimə və ya əlaqəsiz aksiz qaydaları cavaba qarışmamalıdır
+    assert.ok(!res.cavab.metn.includes("163.2"), "Qaimə inkar edildiyi halda 163.2 ləğv qaydası qarışmamalıdır");
+    assert.ok(!res.cavab.metn.includes("Aksizli"), "Əlaqəsiz aksizli mallar qaydası çıxarılmamalıdır");
+
+    // 2) Maddə 109.8-in 2% limiti və mallar/xidmətlər fərqi dəqiq təqdim olunmalıdır
+    assert.ok(res.cavab.metn.includes("109.8"), "Maddə 109.8-ə istinad olmalıdır");
+    assert.ok(res.cavab.metn.includes("2 faiz"), "İllik 2% limit qaydası göstərilməlidir");
+    assert.ok(res.cavab.metn.includes("Xidmət"), "Xidmətlərin kassa çeki ilə xərcə salınmaması qeyd edilməlidir");
+  });
+
   console.log(`\n======================================================`);
   console.log(`📊 TEST NƏTİCƏSİ: ${kecen} keçdi, ${ugursuz} uğursuz`);
   console.log(`======================================================\n`);
