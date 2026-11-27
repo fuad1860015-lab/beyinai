@@ -542,13 +542,13 @@ function simulyatorCiz() {
       tarixceQabi.innerHTML = `<div style="font-size:11.5px; color:var(--metn-solgun); padding:8px 0;">Hələ sınaq keçirilməyib.</div>`;
     } else {
       tarixceQabi.innerHTML = list.map(t => {
-        const balKlas = t.bal >= 70 ? "ugurlu" : "zeif";
+        const balKlas = t.yoxlanib && t.ugurlu_mu ? "ugurlu" : "zeif";
         const dersler = Array.isArray(t.dersler) ? t.dersler : [];
         return `
           <div class="sim-tarixce-satiri">
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <span style="font-weight:600; color:#f1f5f9;">${htmlQoru(t.basliq)}</span>
-              <span class="sim-netice-bal-badge ${balKlas}">${t.bal}%</span>
+              <span class="sim-netice-bal-badge ${balKlas}">${t.yoxlanib ? t.bal + "%" : "⏳ yoxlanmayıb"}</span>
             </div>
             <div style="font-size:11px; color:var(--metn-solgun); margin:4px 0;">${htmlQoru(t.audit_netice || "")}</div>
             ${dersler.map(d => `<div class="sim-ders-satiri">💡 ${htmlQoru(d)}</div>`).join("")}
@@ -587,14 +587,14 @@ async function simulyasiyaIcraEt() {
       const qutu = document.getElementById("simCanliNeticeQutusu");
       const kart = document.getElementById("simNeticeKarti");
       const net = res.netice;
-      const balKlas = net.bal >= 70 ? "ugurlu" : "zeif";
+      const balKlas = net.yoxlanib && net.ugurlu_mu ? "ugurlu" : "zeif";
       const dersler = Array.isArray(net.dersler) ? net.dersler : [];
 
       if (kart) {
         kart.innerHTML = `
           <div class="sim-netice-basliq-satir">
             <span style="font-weight:700; font-size:13px; color:#f1f5f9;">🎯 Sınaq Nəticəsi: ${htmlQoru(net.basliq)}</span>
-            <span class="sim-netice-bal-badge ${balKlas}">${net.bal} / 100 Bal (${net.ugurlu_mu ? "Müvəffəq" : "Çatışmazlıq"})</span>
+            <span class="sim-netice-bal-badge ${balKlas}">${net.yoxlanib ? `${net.bal} / 100 Bal (${net.ugurlu_mu ? "Müvəffəq" : "Çatışmazlıq"})` : "⏳ Yoxlanılmayıb"}</span>
           </div>
           <div style="font-size:12px; color:#cbd5e1; margin-bottom:8px; line-height:1.5;">
             <strong>Auditor Rəyi:</strong> ${htmlQoru(net.audit_netice)}
@@ -1797,6 +1797,10 @@ function yaddasCiz() {
     }).join("");
   }
 
+  qutu.insertAdjacentHTML("beforeend",
+    `<button type="button" id="btnYaddasZibil" class="kicik-duyme" style="margin-top:8px; width:100%;">🗑️ Zibil qutusu (silinənləri geri qaytar)</button><div id="yaddasZibilQabi"></div>`);
+  document.getElementById("btnYaddasZibil").addEventListener("click", yaddasZibiliniGoster);
+
   const kecid = document.getElementById("btnYaddasdanTekamulAc");
   if (kecid) {
     kecid.addEventListener("click", () => simulyatorModalAc());
@@ -1822,10 +1826,38 @@ function yaddasCiz() {
     btn.addEventListener("click", async () => {
       const id = btn.getAttribute("data-yad-sil");
       await apiSorgu(`/api/yaddas/${encodeURIComponent(id)}`, "DELETE");
-      bildirisGoster("🗑️ Yaddaş qeydi silindi");
+      bildirisGoster("🗑️ Yaddaş qeydi zibil qutusuna köçürüldü");
       melumatlariYenile();
     });
   });
+}
+
+async function yaddasZibiliniGoster() {
+  const qab = document.getElementById("yaddasZibilQabi");
+  if (!qab) return;
+  try {
+    const net = await apiSorgu("/api/yaddas/zibil");
+    const siyahi = net.zibil || [];
+    qab.innerHTML = siyahi.length === 0
+      ? `<div style="font-size:12px; color:var(--metn-solgun); padding:8px 0;">Zibil qutusu boşdur.</div>`
+      : siyahi.map(y => `
+        <div class="yaddas-kart" style="opacity:0.75;">
+          <div class="yaddas-kart-ust">
+            <span>[${htmlQoru(y.kateqoriya)}] • ${htmlQoru(y.menbe)}</span>
+            <button type="button" class="menbe-sil-duyme" data-yad-berpa="${htmlQoru(y.id)}" title="Geri qaytar" style="color:#34d399;">↩️</button>
+          </div>
+          <div>${htmlQoru(y.metn)}</div>
+        </div>`).join("");
+    qab.querySelectorAll("[data-yad-berpa]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        await apiSorgu("/api/yaddas/zibil/berpa", "POST", { id: btn.getAttribute("data-yad-berpa") });
+        bildirisGoster("↩️ Qeyd geri qaytarıldı");
+        melumatlariYenile();
+      });
+    });
+  } catch (err) {
+    bildirisGoster("❌ " + err.message);
+  }
 }
 
 // ---- Fayl Yükləmə (Canlı Progress Zolağı və Ləğv Etmə ilə!) ----
@@ -1955,7 +1987,7 @@ async function sualGonder(sualMetni) {
         tarix_son: document.getElementById("filtrTarixSon").value,
         derin_rejim: derinAktiv
       },
-      { signal: veziyyet.sohbetAbort.signal, timeoutMs: 75000 }
+      { signal: veziyyet.sohbetAbort.signal, timeoutMs: 180000 }
     );
 
     clearInterval(sanTimer);
