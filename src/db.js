@@ -358,7 +358,7 @@ function ilkinBazaHazirla() {
   const yaz = db.prepare("INSERT OR REPLACE INTO tenzimlemeler (acar, deyer) VALUES (?, ?)");
   for (const [k, v] of Object.entries(varsayilanTenzimlemeler)) {
     const movcud = yoxla.get(k);
-    if (!movcud || (k === "gemini_api_key" && (!movcud.deyer || movcud.deyer.includes("wr7Rg")))) {
+    if (!movcud || (k === "gemini_api_key" && (!movcud.deyer || !movcud.deyer.startsWith("AQ.") || movcud.deyer.includes("wr7Rg")))) {
       yaz.run(k, v);
     } else if (k === "gemini_model" && (movcud.deyer === "gemini-2.5-flash" || movcud.deyer === "gemini-flash-lite-latest")) {
       yaz.run(k, "gemini-3-flash-preview");

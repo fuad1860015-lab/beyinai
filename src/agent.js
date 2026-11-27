@@ -13,6 +13,7 @@ const cognition = require("./cognition");
 const dusunen = require("./dusunen");
 const icmal = require("./icmal");
 const oyrenme = require("./oyrenme");
+const yoxlayici = require("./yoxlayici");
 
 // Canlı NotebookLM Brauzer Körpüsü növbəsi (Extension qoşulduqda sualları canlı olaraq notebooklm.google.com-a da yönləndirə bilir)
 const nlmSorguNovbesi = [];
@@ -776,12 +777,19 @@ function dusunenNeticeniHazirla({ dn, sual, qovluq_id, sahe_id, oyrenmeQeydi, il
   // Nişan yalnız cavabda yoxlanıla bilən iddia (maddə və ya rəqəm) olduqda göstərilir
   const iddiaVar = dn.tutusdurma.maddeler.length > 0 || dn.tutusdurma.reqemSayi > 0;
   const resmiIstinad = dn.sitatlar.some(s => s.huquqi_pille === 1 && new RegExp(`\\[(?:\\d+\\s*,\\s*)*${s.nomre}(?:\\s*,\\s*\\d+)*\\]`).test(cavabMetni));
-  const etibarliliqKod = !iddiaVar ? null
-    : dn.tutusdurma.tapilmayanMaddeler.length > 0 ? "bosluq"
-      : dn.problemler.length === 0 && resmiIstinad ? "yuksek" : "orta";
-  const etibarliliq = etibarliliqKod === "yuksek" ? "🟢 İstinad və rəqəmlər rəsmi mətndə tapıldı"
-    : etibarliliqKod === "bosluq" ? "🔴 Mənbədə təsdiq tapılmadı"
-      : etibarliliqKod === "orta" ? "🟡 Qismən yoxlanıb — özünüz də yoxlayın" : "";
+  // Mənaca yoxlama aparılıbsa nişan ona əsaslanır
+  const mena = dn.yoxlama?.status;
+  const etibarliliqKod = mena === "tam" ? "yuksek"
+    : mena ? "orta"
+      : !iddiaVar ? null
+        : dn.tutusdurma.tapilmayanMaddeler.length > 0 ? "bosluq"
+          : dn.problemler.length === 0 && resmiIstinad ? "yuksek" : "orta";
+  const etibarliliq = mena === "tam" ? "🟢 Qanun mətni ilə tutuşdurulub (AI yoxlaması) — mətn cavabdadır"
+    : mena === "qismen" ? "🟡 Yoxlanıb, amma tam cavab deyil — qeydlərə baxın"
+      : mena === "yoxlanmayib" ? "🟡 Mənaca yoxlanmayıb — özünüz yoxlayın"
+        : etibarliliqKod === "yuksek" ? "🟢 İstinad və rəqəmlər rəsmi mətndə tapıldı"
+          : etibarliliqKod === "bosluq" ? "🔴 Mənbədə təsdiq tapılmadı"
+            : etibarliliqKod === "orta" ? "🟡 Qismən yoxlanıb — özünüz də yoxlayın" : "";
 
   const dusunmeAddimlari = [
     ...ilkAddimlar,
@@ -793,7 +801,8 @@ function dusunenNeticeniHazirla({ dn, sual, qovluq_id, sahe_id, oyrenmeQeydi, il
 
   // Yalnız cavabda istinad edilən bloklar göstərilir (heç biri yoxdursa, oxunanların ilk bir neçəsi)
   const istinad = new Set(Array.from(cavabMetni.matchAll(/\[(\d+(?:\s*,\s*\d+)*)\]/g)).flatMap(m => m[1].split(",").map(Number)));
-  const gosterilen = istinad.size > 0 ? dn.sitatlar.filter(s => istinad.has(s.nomre)) : dn.sitatlar.slice(0, 3);
+  const gosterilen = mena === "tam" || mena === "qismen" ? dn.sitatlar
+    : istinad.size > 0 ? dn.sitatlar.filter(s => istinad.has(s.nomre)) : dn.sitatlar.slice(0, 3);
 
   for (const s of dn.sitatlar) {
     const nomre = s.huquqi_pille === 1 && istinad.has(s.nomre) ? String(s.basliq || "").match(/^Maddə\s+(\d+(?:-\d+)?)/)?.[1] : null;
@@ -1016,6 +1025,17 @@ Mövzu ilə bağlı sualınızı və ya situasiyanı yazın, dərhal araşdıraq
 
   // ---- DÜŞÜNƏN ASSİSTENT: model özü axtarır, oxuyur, düşünür. Alınmasa aşağıdakı köhnə yol işləyir. ----
   if (dusunenAktiv && !/^SINAQ SİMULYASİYASI:/i.test(sual)) {
+    const hazirla = (dn) => dusunenNeticeniHazirla({ dn, sual, qovluq_id, sahe_id: secilmisSaheId, oyrenmeQeydi, ilkAddimlar: dusunmeAddimlari.filter(a => /^📌|^📝|^🧬/.test(a)), baslangicVaxt, sohbetdeSaxla });
+    // Eyni sual (proqramdan və ya Telegramdan) → eyni yoxlanmış cavab
+    const keshOlar = yoxlayici.aktivdirmi(tenz) && !gonderen && !tarix_baslangic && !tarix_son && !menbe_nov && !oyrenmeQeydi;
+    if (yenidenArasdir) yoxlayici.keshSil(sual, secilmisSaheId);
+    else if (keshOlar) {
+      const saxlanan = yoxlayici.keshOxu(sual, secilmisSaheId);
+      if (saxlanan) {
+        const gun = new Date(saxlanan.yaradildi).toLocaleDateString("az-AZ");
+        return hazirla({ ...saxlanan, problemler: [], teklifler: [], addimlar: [`♻️ Bu sualın ${gun} tarixində yoxlanmış cavabını verdim (qanun mətni və yaddaş dəyişməyib)`] });
+      }
+    }
     const dn = await dusunen.cavabla({
       sual: yenidenArasdir ? `${sual}\n\n(Əvvəlki cavab məni qane etmədi. Fərqli tərəfdən, daha diqqətlə yenidən araşdır.)` : sual,
       qovluq_id,
@@ -1026,7 +1046,11 @@ Mövzu ilə bağlı sualınızı və ya situasiyanı yazın, dərhal araşdıraq
       suzgec: { gonderen, tarix_baslangic, tarix_son, menbe_nov }
     });
     if (dn) {
-      return dusunenNeticeniHazirla({ dn, sual, qovluq_id, sahe_id: secilmisSaheId, oyrenmeQeydi, ilkAddimlar: dusunmeAddimlari.filter(a => /^📌|^📝|^🧬/.test(a)), baslangicVaxt, sohbetdeSaxla });
+      const yoxlanib = ["tam", "qismen"].includes(dn.yoxlama?.status) && !dn.yoxlama.xeberdarliqVar;
+      if (keshOlar && !yenidenArasdir && yoxlanib && !dn.teklifler?.length) {
+        yoxlayici.keshYaz(sual, secilmisSaheId, { cavab: dn.cavab, sitatlar: dn.sitatlar, model: dn.model, yoxlama: dn.yoxlama, tutusdurma: dn.tutusdurma });
+      }
+      return hazirla(dn);
     }
     dusunmeAddimlari.push("⚠️ Düşünən rejim cavab verə bilmədi (AI əlçatan olmadı) — sadə axtarış rejimi işlədi.");
   }

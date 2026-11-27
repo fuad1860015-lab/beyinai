@@ -18,9 +18,9 @@ const AKTIV_B64_ACAR = "QVEuQWI4Uk42SkVKM3J5QndWa01GZjN5MVZ6LVJvaVlMaS1rMG5BWkZh
 
 function acarAl(tenz) {
   let key = String(tenz?.gemini_api_key || "").trim();
-  if (!key || key.includes("wr7Rg")) {
+  if (!key || !key.startsWith("AQ.") || key.includes("wr7Rg")) {
     const envKey = String(process.env.GEMINI_API_KEY || "").trim();
-    if (envKey && !envKey.includes("wr7Rg")) key = envKey;
+    if (envKey && envKey.startsWith("AQ.") && !envKey.includes("wr7Rg")) key = envKey;
     else key = Buffer.from(AKTIV_B64_ACAR, "base64").toString("utf8");
   }
   return key;
@@ -329,6 +329,8 @@ DİQQƏT MƏRKƏZİ
 DƏQİQLİK
 - Kvadrat mötərizədə YALNIZ alətin verdiyi blok nömrəsi olur: [1], [2]. Maddə nömrəsini mətnin içində yaz ("Maddə 124.1"), [124.1] kimi yox.
 - Qanun mətnində birbaşa yazılmayan nəticəni ("bu halda vergi tutulmur" kimi) fakt kimi demə: hansı bəndin bunu dediyini yoxla; tapmasan, öz ehtimalın olduğunu açıq yaz.
+- Sualın hər hissəsinə ayrıca bax ("mal, xidmət" iki ayrı hissədir). İstifadəçinin sözünü qanunun sözü sayma: mətn yalnız birini deyirsə, digəri barədə bu mətndə heç nə olmadığını açıq yaz.
+- Bənd başqa bəndə istinad edirsə, onu da oxu; tələbin kimə aid olduğunu (satıcı, alıcı və s.) oradan dəqiqləşdir.
 - Maddə nömrəsi, faiz, məbləğ və müddəti yalnız bu söhbətdə alətlə oxuduğun mətndən yaz və blokun nömrəsini [1], [2] kimi göstər. Hesablama etmisənsə, necə hesabladığını göstər.
 - Rəsmi qanun mətni xülasə, çat və yaddaşdan üstündür. "... tarixdən qüvvəyə minir" qeydlərinə diqqət et.
 - Tapmadınsa, açıq de ki, tapmadın. İnternetdən gələni "yoxlanmamış" kimi bildir.
@@ -482,6 +484,39 @@ YALNIZ bunları yoxla: təsdiqlənmirsə çıxar və ya əmin olmadığını yaz
   throw new Error("dövrə limiti");
 }
 
+// Hüquqi cavabı göndərməzdən əvvəl qanun mətni ilə mənaca yoxlayır (bax: yoxlayici.js)
+async function menacaYoxla({ netice, sual, saheId, tenz, key, tarixce, aletler }) {
+  const yoxlayici = require("./yoxlayici");
+  // Maaş hesablaması proqramın öz kalkulyatorundandır, onu yenidən yazmırıq
+  if (!yoxlayici.aktivdirmi(tenz) || aletler.addimlar.some(a => a.startsWith("🧮"))) return netice;
+  try {
+    const evvelkiSual = [...tarixce].reverse().find(m => m.rol === "user")?.metn || "";
+    const y = await yoxlayici.yoxla({
+      sual, evvelkiSual: yoxlayici.keshlenebilir(sual) ? "" : evvelkiSual,
+      qaralama: netice.cavab, sitatlar: netice.sitatlar, saheId, key
+    });
+    if (!y) return netice;
+    if (y.alinmadi) {
+      netice.addimlar.push("⚠️ Cavabı qanun mətni ilə ikinci dəfə yoxlaya bilmədim (AI əlçatan olmadı və ya cavab yararsız idi)");
+      return { ...netice, yoxlama: { status: "yoxlanmayib" } };
+    }
+    netice.addimlar.push(`🧐 Cavabı ${y.subutSayi} qanun mətni ilə tutuşdurdum (${y.model})${y.atilan ? `, ${y.atilan} sübutsuz iddia atıldı` : ""}`);
+    for (const d of y.duzelisler) netice.addimlar.push(`✏️ Düzəliş: ${d}`);
+    return {
+      ...netice,
+      cavab: y.cavab,
+      sitatlar: y.sitatlar,
+      problemler: [],
+      tutusdurma: require("./agent").cavabiMenbeyleTutusdur({ cavab: y.cavab, kontekst: y.kontekst, sual }),
+      yoxlama: { status: y.status, xeberdarliqVar: y.xeberdarliqVar }
+    };
+  } catch (e) {
+    console.error("Mənaca yoxlama xətası:", e.message);
+    netice.addimlar.push("⚠️ Cavabı qanun mətni ilə ikinci dəfə yoxlaya bilmədim");
+    return { ...netice, yoxlama: { status: "yoxlanmayib" } };
+  }
+}
+
 /**
  * Sualı düşünən assistent kimi cavablandırır. AI əlçatan deyilsə null qaytarır (köhnə yol işləyir).
  */
@@ -526,12 +561,13 @@ async function cavabla({ sual, qovluq_id = "all", sahe_id = null, tarixce = [], 
       }
       // [124.3] kimi yazılışlar sitat nömrəsi deyil
       netice.cavab = netice.cavab.replace(/\[(\d+(?:\.\d+)+(?:-\d+)?)\]/g, "(bənd $1)");
-      return {
+      const tam = {
         ...netice,
         sitatlar: aletler.sitatlar,
         addimlar: aletler.addimlar,
         teklifler: [...aletler.teklifler.values()].slice(0, 3)
       };
+      return await menacaYoxla({ netice: tam, sual, saheId, tenz, key, tarixce, aletler });
     } catch (e) {
       xetalar.push(e.message);
       if (e.name === "TimeoutError") ai.modelFasilesiYaz(model, 3 * 60 * 1000);

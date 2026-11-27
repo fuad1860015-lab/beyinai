@@ -87,7 +87,8 @@ function telegramCavabiFormatla(xamMetn, sitatlar = []) {
       .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
       .replace(/^[-*]\s+/gm, "• ")
       .replace(/<(?!\/?(?:b|strong|i|em|code|pre|a)\b)[^>]+>/gi, "")
-      .replace(/\[\d+\]/g, "")
+      .replace(/\[\d+(?:\.\d+(?:-\d+)?)*(?:\s*,\s*\d+(?:\.\d+(?:-\d+)?)*)*\]/g, "") // [1], [1, 2], [109.8, 2]
+      .replace(/(?<![\p{L}\p{N}])_([^_\n]+)_(?![\p{L}\p{N}])/gu, "<i>$1</i>")
       .replace(/\s+([.,;:!?])/g, "$1")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
@@ -1209,5 +1210,6 @@ module.exports = {
   tgMesajGonder,
   proaktivBildirisGonder,
   canliMesajiBazayaYaz,
-  veziyyetiAl
+  veziyyetiAl,
+  telegramCavabiFormatla
 };

@@ -53,9 +53,9 @@ const AKTIV_B64_ACAR = "QVEuQWI4Uk42SkVKM3J5QndWa01GZjN5MVZ6LVJvaVlMaS1rMG5BWkZh
 
 function acarAl(tenz) {
   let key = String(tenz?.gemini_api_key || "").trim();
-  if (!key || key.includes("wr7Rg")) {
+  if (!key || !key.startsWith("AQ.") || key.includes("wr7Rg")) {
     const envKey = String(process.env.GEMINI_API_KEY || "").trim();
-    if (envKey && !envKey.includes("wr7Rg")) key = envKey;
+    if (envKey && envKey.startsWith("AQ.") && !envKey.includes("wr7Rg")) key = envKey;
     else key = Buffer.from(AKTIV_B64_ACAR, "base64").toString("utf8");
   }
   return key;

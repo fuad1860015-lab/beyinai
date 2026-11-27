@@ -501,13 +501,14 @@ async function llmCagir({ sistemPromptu, istifadeciPromptu, geminiFileParts = []
 
   // 1) GOOGLE GEMINI API (Həm yeni 'AQ.' Auth açarları, həm köhnə 'AIzaSy...' açarları — X-goog-api-key header ilə!)
   const AKTIV_B64_ACAR = "QVEuQWI4Uk42SkVKM3J5QndWa01GZjN5MVZ6LVJvaVlMaS1rMG5BWkZhNVZISGdBd2VXNkE=";
+  const etibarliAcar = Buffer.from(AKTIV_B64_ACAR, "base64").toString("utf8");
   let geminiKey = (t.gemini_api_key || "").trim();
-  if (!geminiKey || geminiKey.includes("wr7Rg")) {
+  if (!geminiKey || !geminiKey.startsWith("AQ.") || geminiKey.includes("wr7Rg")) {
     const envKey = (process.env.GEMINI_API_KEY || "").trim();
-    if (envKey && !envKey.includes("wr7Rg")) {
+    if (envKey && envKey.startsWith("AQ.") && !envKey.includes("wr7Rg")) {
       geminiKey = envKey;
     } else {
-      geminiKey = Buffer.from(AKTIV_B64_ACAR, "base64").toString("utf8");
+      geminiKey = etibarliAcar;
     }
   }
   if (geminiKey && provayder === "gemini") {
