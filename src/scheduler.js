@@ -11,6 +11,8 @@ const simulator = require("./simulator");
 const connectors = require("./connectors");
 const webResearcher = require("./web-researcher");
 const cognition = require("./cognition");
+const icmal = require("./icmal");
+const oyrenme = require("./oyrenme");
 
 // ---- Tədqiqat Tezliyi İntrvalları (Milli-saniyə ilə) ----
 const TEZLIK_INTERVAL_MS = {
@@ -22,9 +24,18 @@ const TEZLIK_INTERVAL_MS = {
   ayda_1: 30 * 24 * 60 * 60 * 1000   // 30 gündən bir
 };
 
-// Veb interfeys üçün daxili bildirişlər jurnalı (in-memory FIFO növbəsi)
-const vebBildirisler = [];
+// Bildirişlər bazada saxlanılır — proqram yenidən başlayanda itmir
 const MAKS_BILDIRIS_SAYI = 35;
+db.db.exec(`
+  CREATE TABLE IF NOT EXISTS bildirisler (
+    id TEXT PRIMARY KEY,
+    nov TEXT DEFAULT '',
+    basliq TEXT DEFAULT '',
+    metn TEXT DEFAULT '',
+    seviyye TEXT DEFAULT 'info',
+    vaxt INTEGER NOT NULL
+  );
+`);
 
 function bildirisQeydEt({ nov = "tedqiqat", basliq, metn, seviyye = "info" }) {
   const b = {
@@ -35,20 +46,29 @@ function bildirisQeydEt({ nov = "tedqiqat", basliq, metn, seviyye = "info" }) {
     seviyye,
     vaxt: Date.now()
   };
-  vebBildirisler.unshift(b);
-  if (vebBildirisler.length > MAKS_BILDIRIS_SAYI) {
-    vebBildirisler.pop();
-  }
+  db.db.prepare("INSERT INTO bildirisler (id, nov, basliq, metn, seviyye, vaxt) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(b.id, nov, String(basliq || ""), String(metn || ""), seviyye, b.vaxt);
+  db.db.prepare(`DELETE FROM bildirisler WHERE id NOT IN (SELECT id FROM bildirisler ORDER BY vaxt DESC, rowid DESC LIMIT ${MAKS_BILDIRIS_SAYI})`).run();
   return b;
 }
 
 function vebBildirisleriAl() {
-  return [...vebBildirisler];
+  return db.db.prepare("SELECT * FROM bildirisler ORDER BY vaxt DESC, rowid DESC").all();
 }
 
 function bildirisleriTemizle() {
-  vebBildirisler.length = 0;
+  db.db.prepare("DELETE FROM bildirisler").run();
   return { ok: true };
+}
+
+// Gündə bir dəfə (Bakı tarixi ilə) seçilmiş istiqamətin icmalını bildiriş kimi yaradır
+function gundelikIcmalYoxla(vaxt = Date.now()) {
+  const saheId = db.aktivSaheIdAl();
+  const acar = `${icmal.bakiTarixi(vaxt)}|${saheId}`;
+  if (db.tenzimlemeleriAl().icmal_son_acar === acar) return null;
+  const hazir = icmal.icmalHazirla({ saheId, vaxt });
+  db.tenzimlemeYenile({ icmal_son_acar: acar });
+  return bildirisQeydEt({ nov: "icmal", basliq: hazir.basliq, metn: icmal.metnKimi(hazir), seviyye: "info" });
 }
 
 // ---- Azərbaycan Vergi və Hesabat Təqvimi İzləyicisi ----
@@ -122,9 +142,12 @@ async function avtoTedqiqatDovresiCalisdir({ mecburidir = false, fetchFn = null 
     }
   }
 
+  // Avtomatik dövrə yalnız açıq bilik boşluğu araşdırır; sınaqlar pulsuz limiti yemir (əl ilə işə salmaq olar)
   const aktivSahe = db.aktivSaheIdAl();
   const bosluqNetice = simulator.bilikBosluqlariniAvtoTedqiqEt(aktivSahe);
-  const aciqBosluqlar = db.bilikBosluqlariniAl(5);
+  // Son 7 gündə araşdırılmış boşluqlar təkrar araşdırılmır (nəticə Qaralamada sizi gözləyir)
+  const aciqBosluqlar = db.bilikBosluqlariniAl(50)
+    .filter(b => !b.son_arasdirma || indi - b.son_arasdirma > 7 * 24 * 60 * 60 * 1000);
 
   let icraOlunanPrioritet = "";
   let iyerarxikArasdirma = null;
@@ -141,6 +164,11 @@ async function avtoTedqiqatDovresiCalisdir({ mecburidir = false, fetchFn = null 
       sahe_id: aktivSahe,
       fetchFn
     });
+  }
+
+  if (!mecburidir && !iyerarxikArasdirma) {
+    db.tenzimlemeYenile({ scheduler_son_vaxt: String(indi) });
+    return { icraOlundu: false, sebeb: "Araşdırılacaq açıq boşluq yoxdur." };
   }
 
   // PRİORİTET 2: Sahənin Bacarıq Xəritəsində zəif (seviyye='zeif') mövzu varsa, hədəfli olaraq məhz həmin zəif mövzunu məşq et!
@@ -196,7 +224,7 @@ async function avtoTedqiqatDovresiCalisdir({ mecburidir = false, fetchFn = null 
   const tgDuymeler = [];
 
   if (iyerarxikArasdirma) {
-    basliq = `Prioritet 1 — Bilik Boşluğu Araşdırıldı (${iyerarxikArasdirma.qat})`;
+    basliq = `Prioritet 1 — Bilik Boşluğu Araşdırıldı (${iyerarxikArasdirma.tapildi ? "tapıntı Qaralamada" : "tapılmadı"})`;
     metn = `🔍 ${iyerarxikArasdirma.xulase}`;
     if (iyerarxikArasdirma.yaddasQeydi && iyerarxikArasdirma.yaddasQeydi.status === "qaralama") {
       tgDuymeler.push([
@@ -217,9 +245,12 @@ async function avtoTedqiqatDovresiCalisdir({ mecburidir = false, fetchFn = null 
         : icraOlunanPrioritet === "2_canli_cat_mubahisesi"
           ? "Prioritet 2 (Canlı Çat)"
           : "Prioritet 3 (Çarpaz Sınaq)";
-    basliq = `${pEtiket}: ${simNetice.basliq} (${simNetice.bal}% Bal)`;
+    const balYazisi = simNetice.yoxlanib ? `${simNetice.bal}% Bal` : "yoxlanılmayıb";
+    basliq = `${pEtiket}: ${simNetice.basliq} (${balYazisi})`;
     const dersMetnleri = (simNetice.dersler || []).join("\n• ");
-    metn = `🎯 **Sınaq Keysi:** ${simNetice.basliq}\n📊 **Müvəffəqiyyət Balı:** ${simNetice.bal}/100 (${simNetice.ugurlu_mu ? "Uğurlu" : "Çatışmazlıq Aşkarlandı"})\n\n💡 **Öyrənilmiş Dərslər:**\n• ${dersMetnleri || "Normativ qaydalar təsdiqləndi."}`;
+    metn = simNetice.yoxlanib
+      ? `🎯 **Sınaq Keysi:** ${simNetice.basliq}\n📊 **Bal (AI hakim):** ${simNetice.bal}/100 (${simNetice.ugurlu_mu ? "Uğurlu" : "Çatışmazlıq Aşkarlandı"})\n\n💡 **Təsdiqinizi gözləyən qeydlər:**\n• ${dersMetnleri || "Qeyd yoxdur."}`
+      : `🎯 **Sınaq Keysi:** ${simNetice.basliq}\n⏳ ${simNetice.audit_netice}`;
     const ilkQaralama = (simNetice.saxlanilanDersler || []).find(d => d.status === "qaralama");
     if (ilkQaralama) {
       tgDuymeler.push([
@@ -290,12 +321,32 @@ async function teqvimXebardarligiYoxla() {
   return durum.yaxinOlanlar;
 }
 
+// Gündəlik öyrənmə: bitəndə nəticə bildiriş kimi görünür
+async function gundelikOyrenmeIcraEt() {
+  const n = await oyrenme.gundelikOyrenmeYoxla();
+  if (!n?.oyrenilen?.length) return n;
+  bildirisQeydEt({
+    nov: "oyrenme",
+    basliq: `📚 Bu gün ${n.oyrenilen.length} mövzu öyrəndim`,
+    metn: n.oyrenilen.map(o => `• Maddə ${o.madde}. ${o.basliq}${o.hisse_sayi > 1 ? ` [${o.hisse}/${o.hisse_sayi}]` : ""} (${o.fikirSayi} fikir sitatla yoxlandı${o.bendSayi ? `; ${o.bendSayi} bənddən ${o.ehateSayi}-i` : ""}${o.deyisiklikSayi ? "; ⚠️ dəyişiklik var" : ""})`).join("\n") +
+      `\n\nÇatda və ya Telegram-da "nə öyrəndin ${n.oyrenilen[0].madde}" yazıb baxın.`,
+    seviyye: "ugurlu"
+  });
+  return n;
+}
+
 // ---- Heartbeat Timer (Hər 60 saniyədən bir arxa planı yoxlayır) ----
 let schedulerTimer = null;
 
 function schedulerBaslat() {
   if (schedulerTimer) clearInterval(schedulerTimer);
+  // Proqram açılan kimi bugünkü icmal hazır olsun
+  setTimeout(() => {
+    try { gundelikIcmalYoxla(); } catch (e) { console.error("İcmal xətası:", e.message); }
+  }, 2000).unref();
   schedulerTimer = setInterval(async () => {
+    try { gundelikIcmalYoxla(); } catch (e) { console.error("İcmal xətası:", e.message); }
+    gundelikOyrenmeIcraEt().catch(e => console.error("Öyrənmə xətası:", e.message));
     try {
       await teqvimXebardarligiYoxla();
       await avtoTedqiqatDovresiCalisdir({ mecburidir: false });
@@ -321,6 +372,8 @@ module.exports = {
   bildirisQeydEt,
   vebBildirisleriAl,
   bildirisleriTemizle,
+  gundelikIcmalYoxla,
+  gundelikOyrenmeIcraEt,
   schedulerBaslat,
   schedulerDayandir
 };

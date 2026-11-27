@@ -7,20 +7,54 @@
 const db = require("./db");
 const geminiFiles = require("./gemini-files");
 
-// Aktiv və dərin düşünmə qabiliyyətli Gemini modelləri siyahısı (zəif lite modelə düşməzdən əvvəl güclü gemini-flash-latest yoxlanır!)
+// Gemini modelləri (2026-11 vəziyyəti). Biri işləməsə növbətisi sınanır.
+// Google modelləri dövri söndürür: https://ai.google.dev/gemini-api/docs/deprecations
 const GEMINI_DERIN_MODELLER = [
+  "gemini-3.6-flash",
   "gemini-3-flash-preview",
+  "gemini-3.5-flash-lite",
   "gemini-flash-latest",
-  "gemini-3.1-flash-lite-preview",
-  "gemini-flash-lite-latest"
+  "gemini-3.8-flash"
 ];
 
 const GEMINI_SURETLI_MODELLER = [
-  "gemini-3-flash-preview",
-  "gemini-flash-latest",
-  "gemini-3.1-flash-lite-preview",
-  "gemini-flash-lite-latest"
+  "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
+  "gemini-flash-lite-latest",
+  "gemini-3-flash-preview"
 ];
+
+// ---- Model fasiləsi: limit (429), məşğulluq (503) və ya gecikmə verən model bir müddət sınanmır ----
+const modelFasileleri = new Map();
+
+function modelFasilesiYaz(model, millisaniye) {
+  modelFasileleri.set(model, Date.now() + millisaniye);
+}
+function modelFasilesiniSil(model) {
+  modelFasileleri.delete(model);
+}
+function modelFasileleriniSifirla() {
+  modelFasileleri.clear();
+}
+function sinanacaqModeller(siyahi) {
+  const indi = Date.now();
+  const hazir = siyahi.filter(m => !(modelFasileleri.get(m) > indi));
+  // Hamısı fasilədədirsə, fasiləsi ən tez bitən ikisini yenə də yoxla
+  return hazir.length > 0 ? hazir : [...siyahi].sort((a, b) => modelFasileleri.get(a) - modelFasileleri.get(b)).slice(0, 2);
+}
+async function xetayaGoreFasile(model, res) {
+  if (res.status === 429) {
+    const metn = await res.clone().text().catch(() => "");
+    const saniye = Number((metn.match(/"retryDelay"\s*:\s*"(\d+)/) || [])[1]) || 0;
+    const gunluk = /per\s*day|PerDay/i.test(metn);
+    modelFasilesiYaz(model, gunluk ? 60 * 60 * 1000 : Math.min(15 * 60, Math.max(60, saniye)) * 1000);
+  } else if (res.status === 404) {
+    modelFasilesiYaz(model, 6 * 60 * 60 * 1000);
+  } else if (res.status >= 500) {
+    modelFasilesiYaz(model, 3 * 60 * 1000);
+  }
+}
+const GEMINI_UMUMI_VAXT_MS = 75 * 1000; // bütün modellər üzrə ümumi gözləmə həddi
 
 function geminiModelSiyahisiAl(secilmishModel, derinRejim = true) {
   const bazaSiyahi = derinRejim ? GEMINI_DERIN_MODELLER : GEMINI_SURETLI_MODELLER;
@@ -29,7 +63,7 @@ function geminiModelSiyahisiAl(secilmishModel, derinRejim = true) {
     return bazaSiyahi;
   }
   const temiz = secilmishModel.trim();
-  if (derinRejim && (temiz === "gemini-flash-lite-latest" || temiz === "gemini-3.1-flash-lite-preview")) {
+  if (temiz === "gemini-3.1-flash-lite-preview" || (derinRejim && temiz === "gemini-flash-lite-latest")) {
     return bazaSiyahi;
   }
   return Array.from(new Set([temiz, ...bazaSiyahi]));
@@ -59,7 +93,7 @@ async function vektorYarat(metn, tenz = null) {
 
     if (t.gemini_api_key || process.env.GEMINI_API_KEY) {
       const key = (t.gemini_api_key || process.env.GEMINI_API_KEY || "").trim();
-      const embedModeller = ["gemini-embedding-001", "text-embedding-004"];
+      const embedModeller = ["gemini-embedding-001"]; // text-embedding-004 2026-01-14-də söndürülüb
       for (const em of embedModeller) {
         try {
           const res = await fetch(
@@ -119,8 +153,8 @@ async function menbeVektorlashdir(menbeDetali) {
   if (!Array.isArray(menbeDetali.parcalar)) return;
   if (!gecerliGeminiKey && t.ai_provayder !== "ollama") return;
 
-  // Yalnız vektoru olmayan parçaları seç (maksimum 100 parça)
-  const siyahı = menbeDetali.parcalar.filter(p => !p.vektor).slice(0, 100);
+  // Vektoru olmayan bütün parçalar (xəta olduqda dayanır, sonra "vektor yenilə" ilə davam etmək olur)
+  const siyahı = menbeDetali.parcalar.filter(p => !p.vektor);
   for (const p of siyahı) {
     const metn = `${p.basliq ? p.basliq + "\n" : ""}${p.gonderen ? "Göndərən: " + p.gonderen + "\n" : ""}${p.metn}`;
     const v = await vektorYarat(metn, t);
@@ -361,37 +395,6 @@ function lokalAnalitikCavabQur(sual, sitatlar, uygunQizilQaydalar = null, ziddiy
     return `Bu sual üzrə daxili aktiv mənbələrdə uyğun sənəd tapılmadı. Sol paneldən PDF, Word, Excel yükləyə və ya yuxarı sağdakı ⚙️ Tənzimləmələr bölməsindən AI API açarı daxil edərək universal cavab ala bilərsiniz.`;
   }
 
-  // 1) Xüsusi İntellektual Sintez: Kassa çeki ilə malların/xidmətlərin xərcə salınması (Maddə 109.8)
-  const isKassaCekiXerc = /(?:kassa|nka)\s*çek[iü]?.*(?:xərc|mənfəət|gəlirdən|alınan|mal)|xərc.*(?:kassa|nka)\s*çek[iü]?/i.test(sualKicik);
-  if (isKassaCekiXerc) {
-    const p109 = (sitatlar || []).find(s => String(s.metn || "").includes("109.8") || String(s.basliq || "").includes("109"));
-    const nomre = p109 ? p109.nomre : 1;
-
-    return `### 📌 Ekspert Qərarı və Xülasə:
-
-- **Mallar üzrə (Bəli, 2% limiti ilə):** Vergi Məcəlləsinin 109.8-ci maddəsinə əsasən, vergi ödəyicilərindən yeni nəsil NKA (kassa) çeki ilə alınan **mallar** üzrə xərclər vergi ödəyicisinin hər il üçün gəlirlərinin və xərclərinin ən yüksəyinin **2 faizi həddində** mənfəət bəyannaməsində gəlirdən çıxılan xərclərə aid edilə bilər [${nomre}].
-- **Xidmət və İşlər üzrə (Xeyr, qəti qadağandır):** Xidmət və işlərin kassa çeki ilə xərcə salınmasına qanunvericilik icazə vermir. Xidmətlərin xərc kimi tanınması üçün mütləq **elektron qaimə-faktura (və ya təhvil-təslim aktı)** tələb olunur.
-- **2%-dən yuxarı məbləğ:** 2 faizlik həddi aşan hissə mənfəət vergisi məqsədləri üçün gəlirdən çıxılmayan xərc hesab edilir.
-
-<DETALLI_ANALIZ>
-### 🔍 Qanunvericilik Normaları və Tətbiq Şərtləri:
-
-#### 📋 1. Məcəllənin 109.8-ci Maddəsinin Tələbi:
-- Nəzarət-kassa aparatının (NKA) çeki bu Məcəllənin 50.8-ci maddəsinin tələblərinə tam cavab verməlidir (fiskal ID, malın adı, miqdarı, VÖEN aydın görünməlidir) [${nomre}].
-- Limit hesablanarkən vergi ödəyicisinin illik gəlir və xərclərindən hansı daha yüksəkdirsə, həmin məbləğin 2%-i baza götürülür.
-
-#### 🚫 2. Xüsusi İstisnalar (Heç vaxt kassa çeki ilə xərcə salına bilməz):
-- Daşınmaz əmlak, avtomobil nəqliyyatı vasitələri və daşınar əsas vəsaitlərin alışı;
-- Qiymətli daşlar, qiymətli metallar və onlardan hazırlanmış məmulatlar;
-- "Nağdsız hesablaşmalar haqqında" Qanunun 3.5-ci maddəsində göstərilən xüsusi mallar.
-</DETALLI_ANALIZ>
-
-<NOVBETI_SUALLAR>
-- Bəs illik gəlir və xərclərin 2% limiti vergi bəyannaməsində hansı sətirdə göstərilir?
-- NKA çeki itdikdə və ya silindikdə onun dublikatı ilə xərc təsdiqlənə bilərmi?
-</NOVBETI_SUALLAR>`;
-  }
-
   const kokler = db.sozKokleri(sual);
   const maddeler = [];
   const gorulen = new Set();
@@ -532,12 +535,14 @@ async function llmCagir({ sistemPromptu, istifadeciPromptu, geminiFileParts = []
       }
     ];
 
-    for (const model of modeller) {
+    const zencirBasladi = Date.now();
+    for (const model of sinanacaqModeller(modeller)) {
+      if (Date.now() - zencirBasladi > GEMINI_UMUMI_VAXT_MS) break;
       try {
         const dusunmeDestekleyir = model !== "gemini-flash-lite-latest";
         const generationConfig = {
           temperature: aktivDerinRejim ? 0.12 : 0.15,
-          maxOutputTokens: aktivDerinRejim ? 5120 : 4096
+          maxOutputTokens: aktivDerinRejim ? 8192 : 4096
         };
         if (dusunmeDestekleyir) {
           generationConfig.thinkingConfig = {
@@ -547,7 +552,7 @@ async function llmCagir({ sistemPromptu, istifadeciPromptu, geminiFileParts = []
         }
 
         const timeoutMs = aktivDerinRejim ? 32000 : 20000;
-        const res = await fetch(
+        const gonder = () => fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
           {
             method: "POST",
@@ -563,6 +568,18 @@ async function llmCagir({ sistemPromptu, istifadeciPromptu, geminiFileParts = []
             signal: AbortSignal.timeout(timeoutMs)
           }
         );
+        let res = await gonder();
+        // Bəzi modellər "thinkingBudget" parametrini qəbul etmir — onsuz təkrar yoxla
+        if (res.status === 400 && generationConfig.thinkingConfig) {
+          const xetaMetni = await res.clone().text().catch(() => "");
+          if (/thinking/i.test(xetaMetni)) {
+            delete generationConfig.thinkingConfig;
+            res = await gonder();
+          }
+        }
+
+        if (res.ok) modelFasilesiniSil(model);
+        else await xetayaGoreFasile(model, res);
 
         if (res.ok) {
           const data = await res.json();
@@ -594,8 +611,9 @@ async function llmCagir({ sistemPromptu, istifadeciPromptu, geminiFileParts = []
             break;
           }
         }
-      } catch (_) {
-        // Bu modeldə timeout və ya 503 oldusa, dərhal növbəti Gemini modelini yoxla!
+      } catch (e) {
+        // Gecikən model bir müddət ötürülür, dərhal növbətisi yoxlanır
+        if (e?.name === "TimeoutError") modelFasilesiYaz(model, 3 * 60 * 1000);
       }
     }
   }
@@ -625,7 +643,8 @@ async function llmCagir({ sistemPromptu, istifadeciPromptu, geminiFileParts = []
 
   // 3) GROQ API (provayder groq-dursa VƏ YA Gemini uğursuz oldusa ehtiyat kimi!)
   const groqKey = (t.groq_api_key || process.env.GROQ_API_KEY || "").trim();
-  if (groqKey && (provayder === "groq" || !t.gemini_api_key || llmCagir.sonMelumat.xeta)) {
+  // Bura çatmışıqsa, Gemini (seçilibsə) cavab verməyib — gecikmə halında da Groq sınanır
+  if (groqKey) {
     const model = t.groq_model || "llama-3.3-70b-versatile";
     const mesajlar = [
       { role: "system", content: sistemPromptu },
@@ -690,6 +709,13 @@ async function llmCagir({ sistemPromptu, istifadeciPromptu, geminiFileParts = []
       const data = await res.json();
       const cavab = data?.choices?.[0]?.message?.content;
       if (cavab && cavab.trim().length > 10) {
+        // İstifadəçi hansı modelin cavab verdiyini bilməlidir
+        llmCagir.sonMelumat = {
+          daxiliDusunce: "",
+          model: "Pollinations (pulsuz ehtiyat model — dəqiqliyi zəif ola bilər)",
+          derinRejim: aktivDerinRejim,
+          xeta: llmCagir.sonMelumat.xeta || "Əsas AI modelləri cavab vermədi"
+        };
         return cavab.trim();
       }
     }
@@ -855,38 +881,41 @@ async function universalSorguPlanla({ sual, aktivMenbeAdlari = [], tenz = null }
   const prompt = `İstifadəçinin sualı: "${sual}"
 Bazadakı sənədlər: ${aktivMenbeAdlari.slice(0, 6).join(", ") || "Ümumi sənədlər"}
 
-Tapşırıq: İstifadəçi sualı gündəlik dildə verib. Bu sualın cavabını yuxarıdakı sənədlərdə dəqiq tapmaq üçün onu rəsmi hüquqi/texniki terminlərə və aid olduğu dəqiq Maddə nömrələrinə (məs: "Maddə 163", "Maddə 72.4-1", "Maddə 125", "Maddə 169" və s.) çevir.
+Tapşırıq: İstifadəçi sualı gündəlik dildə verib. Bu sualın cavabını yuxarıdakı sənədlərdə dəqiq tapmaq üçün onu rəsmi hüquqi/texniki terminlərə çevir (əmin olduğun Maddə nömrəsi varsa əlavə et).
 Yalnız 3 fərqli axtarış sətri yaz (hər sətirdə açar sözlər və maddə nömrələri olsun, nömrələmə və əlavə izah yazma):`;
 
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-goog-api-key": t.gemini_api_key.trim()
-        },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.1,
-            maxOutputTokens: 160
-          }
-        }),
-        signal: AbortSignal.timeout(3500)
+  for (const model of ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-goog-api-key": t.gemini_api_key.trim()
+          },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.1,
+              maxOutputTokens: 600
+            }
+          }),
+          signal: AbortSignal.timeout(5000)
+        }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        const metn = data?.candidates?.[0]?.content?.parts?.filter(p => !p.thought).map(p => p.text || "").join("\n") || "";
+        const setirler = metn
+          .split(/\r?\n/)
+          .map(s => s.replace(/^[-*•\s]+|^\d+[.)]\s+/g, "").trim())
+          .filter(s => s.length >= 4 && s.length <= 180)
+          .slice(0, 3);
+        if (setirler.length) return setirler;
       }
-    );
-    if (res.ok) {
-      const data = await res.json();
-      const metn = data?.candidates?.[0]?.content?.parts?.map(p => p.text || "").join("\n") || "";
-      return metn
-        .split(/\r?\n/)
-        .map(s => s.replace(/^[-*•\d.)\s]+/, "").trim())
-        .filter(s => s.length >= 4 && s.length <= 180)
-        .slice(0, 3);
-    }
-  } catch (_) {}
+    } catch (_) {}
+  }
   return [];
 }
 
@@ -897,6 +926,10 @@ module.exports = {
   vektorIsiVeziyyetiAl,
   mediaAnalizEt,
   llmCagir,
+  sinanacaqModeller,
+  modelFasilesiYaz,
+  modelFasileleriniSifirla,
+  xetayaGoreFasile,
   universalSorguPlanla,
   lokalAnalitikCavabQur,
   sitatliCavabVer

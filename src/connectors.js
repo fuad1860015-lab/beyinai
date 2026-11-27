@@ -510,9 +510,11 @@ async function tgUpdateEmalEt(token, update) {
       "• 🧬 <b>Özünü-İnkişaf Paneli:</b> <code>/tekamul</code> — Qaralama qaydalar, Boz Zona dosyeləri və Düşünmə alqoritmi\n" +
       "• 🧪 <b>Canlı Avtonom Sınaq:</b> <code>/sinaq</code> — 3-pilləli ağıllı öyrənmə dövrəsini dərhal işə sal\n" +
       "• 🧮 <b>Kalkulyator:</b> <code>hesabla maaş 1500 net</code> və ya <code>hesabla son haqq-hesab 1500 maaş 14 gün</code>\n" +
-      "• 📰 <b>Həftəlik Bülleten:</b> <code>/bulleten</code> — Qruplardan toplanmış canlı keyslərin icmalı\n" +
+      "• ☀️ <b>Gündəlik İcmal:</b> <code>icmal göndər</code> — dəyişikliklər, tarixlər, suallarım\n" +
+      "• 📚 <b>Öyrənmə:</b> <code>öyrən</code>, <code>nə öyrəndin</code>, <code>nə öyrəndin 105</code>, <code>qeydi sil 105</code>\n" +
+      "• 📰 <b>Həftəlik Bülleten:</b> <code>/bulleten</code> — Qruplardan toplanmış canlı keyslər\n" +
       "• 📉 <b>Bilik Boşluqları:</b> <code>/bosluqlar</code> — Bazada sənəd çatışmayan mövzuların hesabatı\n" +
-      "• 🧬 <b>Yaddaş Konsolidasiyası:</b> <code>/yaddas_temizle</code> — Dublikat və ziddiyyətli qeydləri birləşdir\n" +
+      "• 🧬 <b>Yaddaş Konsolidasiyası:</b> <code>/yaddas_temizle</code> — Təkrar və ziddiyyətli qeydləri yoxla (<code>/zibil</code> — silinənlər)\n" +
       "• 💾 <b>Baza Yedəkləməsi:</b> <code>/backup</code> — SQLite bazasını ehtiyat fayl kimi göndər\n" +
       "• ℹ️ <b>Sistem Statusu:</b> <code>/status</code> | 📌 <b>Şəxsi Qayda:</b> <code>/qeyd Mətn...</code>\n\n" +
       "💼 <b>Qrup Təcrübələri:</b> Digər Telegram qruplarındakı maraqlı mühasib müzakirələrini bura Forward etsəniz, avtomatik <b>Mühasibatlıq Praktikası Bankına</b> yazılacaq!"
@@ -731,6 +733,27 @@ async function tgUpdateEmalEt(token, update) {
     return;
   }
 
+  // Zibil qutusu (/zibil) və geri qaytarma (/berpa ID)
+  if (metn === "/zibil") {
+    const siyahi = db.yaddasZibiliAl(10);
+    const html = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    await tgMesajGonder(
+      token,
+      chatId,
+      siyahi.length === 0
+        ? "🗑️ Zibil qutusu boşdur."
+        : "🗑️ <b>Zibil qutusu</b> (geri qaytarmaq üçün <code>/berpa ID</code>):\n\n" +
+          siyahi.map(y => `<code>${y.id}</code> — ${html(y.metn.slice(0, 200))}`).join("\n\n")
+    );
+    return;
+  }
+
+  if (/^\/berpa\s+\S+/.test(metn)) {
+    const berpa = db.yaddasBerpaEt(metn.split(/\s+/)[1]);
+    await tgMesajGonder(token, chatId, berpa ? "↩️ Qeyd geri qaytarıldı." : "⚠️ Bu ID zibil qutusunda tapılmadı.");
+    return;
+  }
+
   // Yaddaşın Özünü-Təmizləməsi (/yaddas_temizle)
   if (metn === "/yaddas_temizle" || metn === "/konsolidasiya") {
     await tgMesajGonder(token, chatId, "🧬 <b>Yaddaş Konsolidasiyası başlayır...</b> Dublikat və ziddiyyətli qeydlər yoxlanılır...");
@@ -744,8 +767,37 @@ async function tgUpdateEmalEt(token, update) {
     return;
   }
 
+  // Gündəlik İcmal ("icmal göndər" və ya /icmal)
+  const icmal = require("./icmal");
+  if (icmal.icmalEmridirmi(metn) && !msg.forward_date) {
+    try {
+      const hazir = icmal.icmalHazirla();
+      const html = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const govde = hazir.bolmeler.map(b => `<b>${html(b.basliq)}</b>\n${b.setirler.map(s => `• ${html(s)}`).join("\n")}`).join("\n\n");
+      await tgMesajGonder(token, chatId, `<b>${html(hazir.basliq)}</b>\n\n${govde}`);
+    } catch (e) {
+      await tgMesajGonder(token, chatId, `⚠️ İcmal hazırlanarkən xəta: ${e.message}`);
+    }
+    return;
+  }
+
+  // Öyrənmə əmrləri ("öyrən", "nə öyrəndin", "qeydi sil 105")
+  const oyrenme = require("./oyrenme");
+  const oyrenmeEmri = oyrenme.emriTani(metn);
+  if (oyrenmeEmri && !msg.forward_date) {
+    try {
+      if (oyrenmeEmri.nov === "oyren") await tgMesajGonder(token, chatId, "📚 Oxumağa başladım, bir dəqiqə...");
+      const netice = await oyrenme.emriIcraEt(oyrenmeEmri);
+      const html = netice.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/^- /gm, "• ");
+      await tgMesajGonder(token, chatId, html);
+    } catch (e) {
+      await tgMesajGonder(token, chatId, `⚠️ Öyrənmə xətası: ${e.message}`);
+    }
+    return;
+  }
+
   // Həftəlik Mühasibat Təcrübə Bülleteni Komandası
-  if (metn === "/bulleten" || metn === "/icmal" || metn === "/bülleten") {
+  if (metn === "/bulleten" || metn === "/bülleten") {
     await tgMesajGonder(token, chatId, "📰 <b>Həftəlik Mühasibat və Vergi Təcrübəsi Bülleteni</b> toplanmış keyslər əsasında hazırlanır...");
     try {
       const bulleten = require("./bulleten");
