@@ -581,7 +581,7 @@ async function llmCagir({ sistemPromptu, istifadeciPromptu, geminiFileParts = []
         } else if (res.status === 400 || res.status === 401 || res.status === 403) {
           const errText = await res.text().catch(() => "");
           if (/API_KEY_INVALID|API key not valid|PERMISSION_DENIED/i.test(errText)) {
-            llmCagir.sonMelumat.xeta = `Gemini API açarı xətası (${res.status}): ${errText.slice(0, 140)}`;
+            llmCagir.sonMelumat.xeta = `Daxil edilmiş Gemini API açarı keçərsizdir (Status ${res.status}: Google AI Studio açarı 'AIzaSy...' ilə başlamalıdır)`;
             break;
           }
         }
