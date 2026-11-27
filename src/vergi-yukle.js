@@ -3,6 +3,7 @@
 const { db } = require("./db");
 const crypto = require("node:crypto");
 
+function vergiYukle() {
 // 1. Köhnə qeydləri təmizləyək
 const kohneler = db.prepare("SELECT id FROM menbeler WHERE ad LIKE '%NLM%' OR ad LIKE '%Vergi Məcəlləsi%'").all();
 for (const k of kohneler) {
@@ -127,3 +128,8 @@ for (let i = 0; i < parcalar.length; i++) {
 }
 
 console.log("✅ Vergi Məcəlləsi sənədi və bütün maddələri uğurla bazaya yazıldı!");
+
+}
+
+module.exports = { vergiYukle };
+if (require.main === module) { vergiYukle(); }

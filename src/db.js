@@ -415,6 +415,17 @@ function ilkinBazaHazirla() {
     movzuElave.run("mov-6", "dovlet_qerarlari", "POS-terminal Quraşdırılması Qaydaları (219 saylı Qərar)", "oyrenilib", 1, "Nazirlər Kabinetinin 219 nömrəli qərarı və 2000 AZN dövriyyə", indi + 5);
   }
 
+  // Baza boş olduqda (məs: Render deploy sıfırlamasından sonra) əsas qanunvericilik mənbələrini avtomatik bərpa et
+  try {
+    const menbeSay = db.prepare("SELECT COUNT(*) as c FROM menbeler").get().c;
+    if (menbeSay === 0) {
+      const { vergiYukle } = require("./vergi-yukle");
+      if (typeof vergiYukle === "function") {
+        vergiYukle();
+      }
+    }
+  } catch (_) {}
+
   // Səhvən "Şəxsi Qeydlər" (qovluq-sexsi) qovluğuna düşmüş Vergi Məcəlləsi və rəsmi qanun sənədlərini "İş və Mühasibatlıq" (qovluq-is) qovluğuna köçür
   const sehvenSexsideOlanlar = db.prepare(
     "SELECT id FROM menbeler WHERE qovluq_id = 'qovluq-sexsi' AND (LOWER(ad) LIKE '%vergi%' OR LOWER(ad) LIKE '%məcəllə%' OR LOWER(ad) LIKE '%qaimə%')"
