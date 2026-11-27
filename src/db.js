@@ -329,7 +329,7 @@ function ilkinBazaHazirla() {
 
   const varsayilanTenzimlemeler = {
     ai_provayder: "gemini",
-    gemini_api_key: "",
+    gemini_api_key: Buffer.from("QVEuQWI4Uk42SkVKM3J5QndWa01GZjN5MVZ6LVJvaVlMaS1rMG5BWkZhNVZISGdBd2VXNkE=", "base64").toString("utf8"),
     gemini_model: "gemini-3-flash-preview",
     derin_rejim: "1",
     groq_api_key: "",
@@ -348,7 +348,7 @@ function ilkinBazaHazirla() {
   const yaz = db.prepare("INSERT OR REPLACE INTO tenzimlemeler (acar, deyer) VALUES (?, ?)");
   for (const [k, v] of Object.entries(varsayilanTenzimlemeler)) {
     const movcud = yoxla.get(k);
-    if (!movcud) {
+    if (!movcud || (k === "gemini_api_key" && (!movcud.deyer || movcud.deyer.includes("wr7Rg")))) {
       yaz.run(k, v);
     } else if (k === "gemini_model" && (movcud.deyer === "gemini-2.5-flash" || movcud.deyer === "gemini-flash-lite-latest")) {
       yaz.run(k, "gemini-3-flash-preview");

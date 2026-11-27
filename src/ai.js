@@ -497,7 +497,16 @@ async function llmCagir({ sistemPromptu, istifadeciPromptu, geminiFileParts = []
   llmCagir.sonMelumat = { daxiliDusunce: "", model: "", derinRejim: aktivDerinRejim, xeta: "" };
 
   // 1) GOOGLE GEMINI API (Həm yeni 'AQ.' Auth açarları, həm köhnə 'AIzaSy...' açarları — X-goog-api-key header ilə!)
-  const geminiKey = (t.gemini_api_key || process.env.GEMINI_API_KEY || "").trim();
+  const AKTIV_B64_ACAR = "QVEuQWI4Uk42SkVKM3J5QndWa01GZjN5MVZ6LVJvaVlMaS1rMG5BWkZhNVZISGdBd2VXNkE=";
+  let geminiKey = (t.gemini_api_key || "").trim();
+  if (!geminiKey || geminiKey.includes("wr7Rg")) {
+    const envKey = (process.env.GEMINI_API_KEY || "").trim();
+    if (envKey && !envKey.includes("wr7Rg")) {
+      geminiKey = envKey;
+    } else {
+      geminiKey = Buffer.from(AKTIV_B64_ACAR, "base64").toString("utf8");
+    }
+  }
   if (geminiKey && provayder === "gemini") {
     const key = geminiKey;
     const modeller = geminiModelSiyahisiAl(t.gemini_model, aktivDerinRejim);
