@@ -9,6 +9,8 @@
 //   madde    — düzgün maddə nömrəsi
 //   menbede  — həmin maddənin rəsmi mətnindən hərfi parça (axtarışı yoxlamaq üçün)
 //   cavabda  — düzgün cavabda mütləq olmalı ifadələr (regex)
+//   olmamali — cavabda olmamalı olan, əvvəl rast gəlinmiş səhvlər (regex, istəyə görə)
+// Səhv tapdınızsa, bura sual kimi əlavə edin ki, bir daha təkrarlansa görünsün.
 "use strict";
 
 const fs = require("node:fs");
@@ -77,7 +79,10 @@ const sade = (s) => String(s || "").replace(/\s+/g, " ");
     if (sira && sira <= 3) ilk3++;
     const metn = String(net.cavab?.metn || "").split(/<NOVBETI_SUALLAR>/i)[0];
     const aiIsledi = canli && net.aiCavabVerdi !== false;
-    const cavabDuz = aiIsledi && s.cavabda.every((r) => new RegExp(r, "i").test(metn));
+    // Əlavə olunan hərfi qanun mətni cavab sayılmır — assistentin öz sözləri yoxlanılır
+    const ozSozu = metn.replace(/<DETALLI_ANALIZ>\s*\*\*Qanunun öz mətni[\s\S]*?<\/DETALLI_ANALIZ>/gi, "");
+    const cavabDuz = aiIsledi && s.cavabda.every((r) => new RegExp(r, "i").test(ozSozu)) &&
+      !(s.olmamali || []).some((r) => new RegExp(r, "i").test(ozSozu));
     if (aiIsledi) aiCavab++;
     if (cavabDuz) duz++;
     const model = (net.dusunmeAddimlari || []).map((d) => (d.match(/Analitik Mühərrik: \*\*([^*]+)\*\*/) || [])[1]).find(Boolean) || null;

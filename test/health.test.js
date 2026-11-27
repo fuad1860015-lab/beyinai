@@ -42,7 +42,7 @@ async function test(ad, fn) {
 
   const db = require("../src/db");
   assert.equal(path.resolve(path.dirname(db.DB_PATH)), path.resolve(testQovlugu), "Test bazası ayrıca olmalıdır");
-  db.tenzimlemeYenile({ gemini_api_key: "", groq_api_key: "", tg_bot_token: "", tg_son_chat_id: "", tg_bildiris_chat_id: "", dusunen_rejim: "0", oyrenme_limiti: "0" });
+  db.tenzimlemeYenile({ gemini_api_key: "", groq_api_key: "", tg_bot_token: "", tg_son_chat_id: "", tg_bildiris_chat_id: "", dusunen_rejim: "0", oyrenme_limiti: "0", mena_yoxlamasi: "0" });
   const ai = require("../src/ai");
   const agent = require("../src/agent");
   const parsers = require("../src/parsers");
@@ -1211,6 +1211,96 @@ async function test(ad, fn) {
       globalThis.fetch = kohneFetch;
       db.tenzimlemeYenile({ gemini_api_key: "", oyrenme_limiti: "0" });
       db.db.prepare("DELETE FROM bilik_qeydleri WHERE sahe_id = ?").run(sahe.id);
+      require("../src/ai").modelFasileleriniSifirla();
+    }
+  });
+
+  await test("48. Cavabın mənaca yoxlanması: istinad olunan bənd oxunur, sübutsuz iddia atılır, eyni suala eyni cavab", async () => {
+    const yoxlayici = require("../src/yoxlayici");
+    require("../src/ai").modelFasileleriniSifirla();
+    const sahe = db.saheYarat({ ad: "T48 sınaq sahəsi", kod: "t48_" + Date.now() });
+    const b928 = "920.8. Uçotda olmayan fiziki şəxslərdən alış aktı əsasında və ya vergi ödəyicilərindən bu Məcəllənin 921.1-ci maddəsinə uyğun çek əsasında malların alınması üzrə xərclərin yuxarı həddi, daşınmaz əmlak istisna olmaqla, hər bir hal üzrə 2 faizdir.";
+    const b921 = "921.1. Çekdə aşağıdakı məlumatlar olmalıdır:";
+    const b9211 = "921.1.1. çeki verən vergi ödəyicisinin adı və VÖEN-i.";
+    const govde = `Maddə 920. Xərclər\n920.1. Ümumi qayda.\n${b928}\n920.9. Başqa qayda.\nMaddə 921. Çek\n${b921}\n${b9211}\n`;
+    const qur = (g) => db.menbeElaveEt({ qovluq_id: "qovluq-is", sahe_id: sahe.id, ad: "T48 Məcəlləsi", nov: "txt", xam_metn: "x ".repeat(32000) + "\n" + g,
+      parcalar: [{ basliq: "Maddə 920. Xərclər", metn: b928 }, { basliq: "Maddə 921. Çek", metn: `${b921}\n${b9211}` }] });
+    let menbe = qur(govde);
+
+    assert.deepEqual(yoxlayici.daxiliIstinadlar(`${b928} Qanunun 3.5-ci maddəsi`), ["921.1"]);
+    const bendi = yoxlayici.bendMetni(govde, "920.8");
+    assert.ok(bendi.includes("hər bir hal üzrə") && !bendi.includes("Başqa qayda"));
+
+    const qaralama = "Bəli, mal və xidmətlər xərcə yazılır, çekdə sizin VÖEN olmalıdır (Maddə 920.8).";
+    const rey = {
+      qisa_cavab: "Mallar üzrə bəli; xidmətlər barədə bu mətndə heç nə deyilmir.",
+      bendler: [
+        { fikir: "Malların alınması xərcinin yuxarı həddi hər bir hal üzrə 2 faizdir, daşınmaz əmlak istisna olmaqla.", blok: 1, sitat: "malların alınması üzrə xərclərin yuxarı həddi, daşınmaz əmlak istisna olmaqla, hər bir hal üzrə 2 faizdir" },
+        { fikir: "Çekdə çeki verənin VÖEN-i olmalıdır.", blok: 2, sitat: "çeki verən vergi ödəyicisinin adı və VÖEN-i" },
+        { fikir: "Alıcının VÖEN-i mütləq yazılmalıdır.", blok: 1, sitat: "çekdə alıcının VÖEN-i mütləq göstərilməlidir" }
+      ],
+      metnde_yoxdur: ["Xidmətlərin kassa çeki ilə xərcə yazılması"],
+      mulahize: "Təxminən 777 manatlıq limit olar.",
+      duzelisler: ["'xidmətlər' çıxarıldı"]
+    };
+    const sorgular = [];
+    let yoxlayiciCavabi = () => rey;
+    const kohneFetch = globalThis.fetch;
+    const gem = (metn) => new Response(JSON.stringify({ candidates: [{ content: { role: "model", parts: [{ text: metn }] } }] }), { status: 200 });
+    globalThis.fetch = async (u, o) => {
+      if (!String(u).includes("generateContent")) throw new Error("bağlı");
+      const g = JSON.parse(o.body);
+      const yoxlamadir = Boolean(g.systemInstruction?.parts?.[0]?.text.includes("müstəqil ekspert"));
+      sorgular.push({ yoxlamadir, metn: g.contents.at(-1).parts[0].text || "" });
+      if (!yoxlamadir) return gem(qaralama);
+      const c = yoxlayiciCavabi();
+      return c ? gem(JSON.stringify(c)) : new Response('{"error":"quota PerDay"}', { status: 429 });
+    };
+    db.tenzimlemeYenile({ gemini_api_key: "TEST-KEY-0123456789012345", dusunen_rejim: "1", mena_yoxlamasi: "1" });
+    const sual = "qaimə yox, kassa çeki ilə alınan mal, xidmət xərcə yazıla bilərmi";
+    const sor = () => agent.agentSualCavabla({ sual, sahe_id: sahe.id, sohbetdeSaxla: false });
+    try {
+      const n = await sor();
+      const y = sorgular.find(s => s.yoxlamadir).metn;
+      assert.ok(y.includes(b928) && y.includes(b9211), "Bənd və istinad etdiyi bənd tam verilməlidir");
+      assert.ok(y.includes("<QARALAMA>") && y.includes(sual));
+      const m = n.cavab.metn;
+      assert.ok(m.startsWith("Mallar üzrə bəli") && m.includes("(Maddə 920.8)") && m.includes("(Maddə 921.1.1)"), m);
+      assert.ok(!m.includes("sizin VÖEN") && !m.includes("Alıcının VÖEN") && !m.includes("777"), "Sübutsuz iddia qalmamalıdır");
+      assert.ok(m.includes("tapmadığım") && m.includes("<DETALLI_ANALIZ>") && m.includes(b928));
+      assert.equal(n.etibarliliqKod, "orta");
+      assert.ok(n.sitatlar.some(s => s.basliq === "Maddə 920.8"));
+
+      const sayi = sorgular.length;
+      const tekrar = await sor();
+      assert.equal(sorgular.length, sayi, "Eyni sual üçün yeni sorğu getməməlidir");
+      assert.equal(tekrar.cavab.metn, m);
+
+      // qanun mətni dəyişəndə saxlanmış cavab işlənmir; şərt düşübsə mətn gizlədilmir
+      menbe = qur(govde.replace("2 faizdir", "3 faizdir"));
+      require("../src/ai").modelFasileleriniSifirla();
+      yoxlayiciCavabi = () => ({ qisa_cavab: "Bəli.", bendler: [{ fikir: "Malların alınması xərcinin həddi var.", blok: 1, sitat: "malların alınması üzrə xərclərin yuxarı həddi" }] });
+      const n2 = await sor();
+      assert.ok(sorgular.length > sayi);
+      assert.ok(n2.cavab.metn.includes("istisna düşüb") && !n2.cavab.metn.includes("<DETALLI_ANALIZ>"), n2.cavab.metn);
+      const sayi2 = sorgular.length;
+      await sor();
+      assert.ok(sorgular.length > sayi2, "Xəbərdarlıqlı cavab saxlanılmır");
+
+      // yoxlama alınmasa açıq nişanlanır
+      require("../src/ai").modelFasileleriniSifirla();
+      yoxlayiciCavabi = () => null;
+      const n3 = await sor();
+      assert.ok(n3.etibarliliq.includes("yoxlanmayıb") && n3.cavab.metn.includes("sizin VÖEN"));
+
+      assert.equal(yoxlayici.keshlenebilir("bəs bu halda xidmət üzrə hansı hədd tətbiq olunur"), false);
+      const tg = require("../src/connectors").telegramCavabiFormatla;
+      if (tg) assert.ok(!tg("Hədd var [109.8, 2] və [1].").qisa.includes("["));
+    } finally {
+      globalThis.fetch = kohneFetch;
+      db.tenzimlemeYenile({ gemini_api_key: "", dusunen_rejim: "0", mena_yoxlamasi: "0" });
+      db.menbeSil(menbe.id);
+      db.db.prepare("DELETE FROM yoxlanmis_cavablar WHERE sahe_id = ?").run(sahe.id);
       require("../src/ai").modelFasileleriniSifirla();
     }
   });
