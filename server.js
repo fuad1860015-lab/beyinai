@@ -242,6 +242,7 @@ const server = http.createServer(async (req, res) => {
     if (yol === "/api/bootstrap" && req.method === "GET") {
       const qovluq_id = urlObj.searchParams.get("qovluq_id") || "all";
       const sahe_id = urlObj.searchParams.get("sahe_id") || db.aktivSaheIdAl();
+      try { scheduler.gundelikIcmalYoxla(); } catch (e) { console.error("İcmal xətası:", e.message); }
       return jsonCavab(res, 200, {
         ok: true,
         saheler: db.saheleriAl(),
@@ -983,6 +984,18 @@ const server = http.createServer(async (req, res) => {
     }
 
     // 9. Uzunmüddətli Şəxsi Yaddaş
+    // Zibil qutusu: silinən qeydlərə baxmaq və geri qaytarmaq
+    if (yol === "/api/yaddas/zibil" && req.method === "GET") {
+      return jsonCavab(res, 200, { ok: true, zibil: db.yaddasZibiliAl(50) });
+    }
+
+    if (yol === "/api/yaddas/zibil/berpa" && req.method === "POST") {
+      const b = await govdeOxu(req);
+      const berpa = db.yaddasBerpaEt(b.id);
+      if (!berpa) return jsonCavab(res, 404, { ok: false, xeta: "Qeyd zibil qutusunda tapılmadı." });
+      return jsonCavab(res, 200, { ok: true, berpa, zibil: db.yaddasZibiliAl(50), yaddas: db.yaddaslariAl(db.aktivSaheIdAl()) });
+    }
+
     if (yol === "/api/yaddas" && req.method === "POST") {
       const b = await govdeOxu(req);
       db.yaddasElaveEt(b);

@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node --no-warnings server.js",
     "dev": "node --no-warnings --watch server.js",
-    "test": "node --no-warnings test/health.test.js"
+    "test": "node --no-warnings test/health.test.js",
+    "imtahan": "node --no-warnings test/imtahan.js",
+    "imtahan:canli": "node --no-warnings test/imtahan.js --canli"
   },
   "engines": {
     "node": ">=22.5.0"
