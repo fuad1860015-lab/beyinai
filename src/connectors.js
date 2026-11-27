@@ -1057,7 +1057,7 @@ async function tgUpdateEmalEt(token, update) {
 async function tgSorğuDövrü() {
   if (!tgVeziyyet.aktiv || tgGedir) return;
   const tenz = db.tenzimlemeleriAl();
-  const token = (tenz.tg_bot_token || "").trim();
+  const token = (tenz.tg_bot_token || process.env.TELEGRAM_BOT_TOKEN || process.env.TG_BOT_TOKEN || "").trim();
   if (!token) {
     tgDayandir();
     return;
@@ -1089,7 +1089,7 @@ async function tgSorğuDövrü() {
 
 async function tgBaslat() {
   const tenz = db.tenzimlemeleriAl();
-  const token = (tenz.tg_bot_token || "").trim();
+  const token = (tenz.tg_bot_token || process.env.TELEGRAM_BOT_TOKEN || process.env.TG_BOT_TOKEN || "").trim();
   if (!token) {
     tgDayandir();
     return { ok: false, xeta: "Telegram Bot Token daxil edilməyib." };
