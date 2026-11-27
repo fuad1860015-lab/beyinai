@@ -1,0 +1,22 @@
+[
+  { "id": "edv-derece", "sual": "ƏDV neçə faizdir?", "madde": "173.1", "menbede": "173.1. ƏDV-nin dərəcəsi", "cavabda": ["18\\s*(%|faiz)"] },
+  { "id": "menfeet-derece", "sual": "MMC mənfəətindən neçə faiz vergi ödəyir?", "madde": "105.1", "menbede": "105.1. Müəssisələrin mənfəətindən", "cavabda": ["20\\s*(%|faiz)"] },
+  { "id": "edv-hedd", "sual": "Hansı dövriyyədən sonra ƏDV qeydiyyatı məcburidir?", "madde": "155.1", "menbede": "155.1. Sahibkarlıq fəaliyyəti göstərən", "cavabda": ["200[\\s.,]?000"] },
+  { "id": "dividend", "sual": "Təsisçiyə dividend ödəyəndə nə qədər vergi tutulur?", "madde": "122.1", "menbede": "122.1. Rezident müəssisə tərəfindən", "cavabda": ["(?<!\\d)5\\s*(%|faiz)"] },
+  { "id": "icare", "sual": "Fiziki şəxsdən ofis icarəyə götürürük, icarə haqqından neçə faiz tutulmalıdır?", "madde": "124.1", "menbede": "124.1. Daşınan və daşınmaz əmlak", "cavabda": ["14\\s*(%|faiz)"] },
+  { "id": "lizinq-qr", "sual": "Qeyri-rezidentə lizinq ödənişindən ödəmə mənbəyində hansı dərəcə ilə vergi tutulur?", "madde": "125.1.3", "menbede": "125.1.3.", "cavabda": ["(?<!\\d)4\\s*(%|faiz)"] },
+  { "id": "hesabat-cerime", "sual": "Vergi hesabatını vaxtında təqdim etməyəndə cərimə neçə manatdır?", "madde": "57.1", "menbede": "57.1. Hesabat dövrü üzrə", "cavabda": ["40\\s*(manat|AZN)"] },
+  { "id": "muqavilesiz-isci", "sual": "Əmək müqaviləsi qüvvəyə minmədən işçi işlətməyə görə hansı maddə ilə cərimə yazılır?", "madde": "58.10", "menbede": "58.10. Azərbaycan Respublikasının Əmək Məcəlləsində", "cavabda": ["58\\.10"] },
+  { "id": "qaytarilan-mal", "sual": "Keçən ay satdığımız mal geri qaytarılıb, ƏDV düzəlişi hansı ayın bəyannaməsində edilir?", "madde": "163.2", "menbede": "Dəqiqləşdirmə qiymətləndirmə bazasında dəyişikliyin", "cavabda": ["dəyişikliyin\\s*baş\\s*verdiyi|cari\\s*(ay|hesabat)"] },
+  { "id": "mikro-75", "sual": "Mikro fərdi sahibkarın 75 faiz gəlir vergisi güzəşti üçün neçə işçi olmalıdır?", "madde": "102.1.30", "menbede": "orta aylıq muzdlu işçi sayı 3 nəfərdən az olmayan", "cavabda": ["(?<!\\d)3\\s*nəfər|(?<!\\d)üç\\s*nəfər|(?<!\\d)3\\s*işçi"] },
+  { "id": "45000-guzest", "sual": "İllik 45 000 manatadək gəliri olan proqramçı hansı vergi güzəştindən istifadə edə bilər?", "madde": "102.1.30-1", "menbede": "102.1.30-1.1. proqram təminatının", "cavabda": ["75\\s*(%|faiz)", "102\\.1\\.30-1"] },
+  { "id": "temir", "sual": "Əsas vəsaitlərin təmir xərcləri gəlirdən hansı həddə qədər çıxılır?", "madde": "115.1", "menbede": "115.1. Hər il üçün gəlirdən", "cavabda": ["(?<!\\d)2\\s*(%|faiz)", "(?<!\\d)5\\s*(%|faiz)"] },
+  { "id": "sadelesdirilmis", "sual": "Sadələşdirilmiş verginin əsas dərəcəsi nə qədərdir?", "madde": "220.1", "menbede": "220.1. Sadələşdirilmiş vergi", "cavabda": ["(?<!\\d)2\\s*(%|faiz)"] },
+  { "id": "muddet-3il", "sual": "Vergi orqanı neçə il ərzində vergini yenidən hesablaya bilər?", "madde": "85.4", "menbede": "85.4. Vergi orqanları", "cavabda": ["(?<!\\d)3\\s*il"] },
+  { "id": "maas-vergi-2026", "sual": "2026-cı ildə özəl qeyri-neft sektorunda 2500 manatadək maaşdan gəlir vergisi neçə faizdir?", "madde": "101.1-1.1", "menbede": "101.1-1.1. 2026-cı il yanvarın", "cavabda": ["(?<!\\d)3\\s*(%|faiz)"] },
+  { "id": "200-guzest", "sual": "Əsas iş yerində aylıq maaşın neçə manatı gəlir vergisindən azaddır?", "madde": "102.1.6", "menbede": "102.1.6. Fiziki şəxsin əsas iş yerində", "cavabda": ["200\\s*(manat|AZN)"] },
+  { "id": "kassa-ceki", "sual": "Kassa çeki ilə alınan malı mənfəət vergisində xərcə salmaq olarmı, hansı limitlə?", "madde": "109.8", "menbede": "109.8.", "cavabda": ["(?<!\\d)2\\s*(%|faiz)"] },
+  { "id": "edv-evezlesme", "sual": "Alışda ödənilən ƏDV nə vaxt əvəzləşdirilir?", "madde": "175.1", "menbede": "175.1. Bu maddədə başqa hallar", "cavabda": ["depozit"] },
+  { "id": "nagd-sanksiya", "sual": "Nağdsız hesablaşmalar qanununu birinci dəfə pozanda maliyyə sanksiyası neçə faizdir?", "madde": "58.7-1", "menbede": "58.7-1. “Nağdsız hesablaşmalar haqqında”", "cavabda": ["10\\s*(%|faiz)"] },
+  { "id": "edv-legv", "sual": "ƏDV tutulan əməliyyatları dayandırsaq qeydiyyatın ləğvi üçün nə etməliyik?", "madde": "158.1", "menbede": "158.1. Vergi ödəyicisi", "cavabda": ["ərizə"] }
+]

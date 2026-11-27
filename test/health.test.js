@@ -2,6 +2,26 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+
+// Testlər REAL bazaya toxunmur: müvəqqəti surətlə, açarsız və internetsiz işləyir
+const testQovlugu = fs.mkdtempSync(path.join(os.tmpdir(), "beyin-test-"));
+for (const f of ["beyin.sqlite", "beyin.sqlite-wal", "beyin.sqlite-shm"]) {
+  const s = path.join(__dirname, "..", "data", f);
+  if (fs.existsSync(s)) fs.copyFileSync(s, path.join(testQovlugu, f));
+}
+process.env.BEYIN_DATA_DIR = testQovlugu;
+delete process.env.GEMINI_API_KEY;
+delete process.env.GROQ_API_KEY;
+delete process.env.TELEGRAM_BOT_TOKEN;
+delete process.env.TG_BOT_TOKEN;
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (u, o) => {
+  if (/^http:\/\/(?:127\.0\.0\.1|localhost)[:/]/.test(String(u))) return realFetch(u, o);
+  throw new Error("test: xarici şəbəkə bağlıdır");
+};
 
 let kecen = 0;
 let ugursuz = 0;
@@ -21,6 +41,8 @@ async function test(ad, fn) {
   console.log("\n🧪 BeyinAI Avtomatik Sistem Testləri Başlayır...\n");
 
   const db = require("../src/db");
+  assert.equal(path.resolve(path.dirname(db.DB_PATH)), path.resolve(testQovlugu), "Test bazası ayrıca olmalıdır");
+  db.tenzimlemeYenile({ gemini_api_key: "", groq_api_key: "", tg_bot_token: "", tg_son_chat_id: "", tg_bildiris_chat_id: "", dusunen_rejim: "0", oyrenme_limiti: "0" });
   const ai = require("../src/ai");
   const agent = require("../src/agent");
   const parsers = require("../src/parsers");
@@ -61,11 +83,26 @@ async function test(ad, fn) {
     assert.ok(parcalar[0].basliq.includes("Praktiki Keys"), "Praktiki Keys etiketi qoyulmalıdır");
   });
 
-  await test("5. Mühasibat Kalkulyatoru (1500 Net -> 1698.29 Gross & Məzuniyyət)", () => {
+  await test("5. Mühasibat Kalkulyatoru (il üzrə dərəcələr, rəqəm oxuma, məzuniyyət)", () => {
     const netRes = calc.kalkulyatorEmalEt("hesabla maas 1500 net");
-    assert.equal(netRes.netice.net, 1500);
-    assert.equal(netRes.netice.gross, 1698.29);
-    assert.equal(netRes.netice.gelirVergisi, 0);
+    assert.ok(Math.abs(netRes.netice.net - 1500) <= 0.01);
+    // 2026: 2500-dək 3% (200 AZN güzəşt) — VM 101.1-1.1
+    const g1500 = calc.maasGrossdanNeteOzel(1500, 2026);
+    assert.equal(g1500.gelirVergisi, 39);
+    assert.equal(g1500.net, 1287.5);
+    assert.equal(calc.maasGrossdanNeteOzel(3000, 2026).net, 2521.5);
+    assert.equal(calc.maasGrossdanNeteOzel(8000, 2026).gelirVergisi, 625);
+    assert.equal(calc.maasGrossdanNeteOzel(1500, 2027).gelirVergisi, 65);
+    for (const n of [400, 1500, 2500, 5000, 12000]) {
+      assert.ok(Math.abs(calc.maasNetdenGrossaOzel(n, 2026).net - n) <= 0.01, `net->gross ${n}`);
+      assert.ok(Math.abs(calc.maasNetdenGrossaDovlet(n, 2026).net - n) <= 0.01, `dövlət net->gross ${n}`);
+    }
+    assert.equal(calc.kalkulyatorEmalEt("hesabla maaş 1 500 gross").netice.gross, 1500);
+    assert.equal(calc.kalkulyatorEmalEt("hesabla maaş 1,500 gross").netice.gross, 1500);
+    assert.equal(calc.kalkulyatorEmalEt("hesabla 2027-ci ildə 1500 gross maaş").netice.il, 2027);
+    assert.equal(calc.kalkulyatorEmalEt("hesabla maaş 3000 net dövlət").netice.sektor, "dovlet");
+    assert.equal(calc.kalkulyatorEmalEt("hesabla maaş 1500 və 2000 gross").nov, "xeta");
+    assert.equal(calc.kalkulyatorSorgusudurmu("İllik dövriyyəsi 250000 manat gross olan şirkət ƏDV qeydiyyatına düşməlidirmi?"), false);
 
     const mezRes = calc.kalkulyatorEmalEt("hesabla mezuniyyet 1200 maas 21 gun");
     assert.equal(mezRes.netice.maas, 1200);
@@ -259,7 +296,7 @@ async function test(ad, fn) {
     const sehvCavab = "Fərdi sahibkarlarda 45 000 AZN güzəşt üçün mütləq 3 işçi tələb olunur və Maddə 102.1.30 yalnız işçi olduqda tətbiq edilir.";
     const sehvQiymet = simulator.helliQiymetlendir({
       cavab: sehvCavab,
-      gozlenilenMaddeler: ["102.1.30"],
+      gozlenilenMaddeler: ["102.1.30-1"],
       kritikMeqamlar: ["45 000 AZN-dək dövriyyəsi olan 13 xidmət sahəsində işçi sayı tələbi yoxdur (0 işçi ilə tətbiq edilir)"]
     });
     assert.strictEqual(sehvQiymet.ugurlu_mu, false, "3 işçi tələsi olan səhv cavab kəsilməlidir");
@@ -269,7 +306,7 @@ async function test(ad, fn) {
     const duzgunCavab = "Vergi Məcəlləsinin 102.1.30-cu maddəsinə əsasən 45 000 AZN-dək dövriyyəsi olan 13 fəaliyyət növündə işçi sayı tələbi yoxdur (0 işçi ilə tətbiq edilir) və 75% gəlir vergisi güzəşti tətbiq olunur.";
     const duzgunQiymet = simulator.helliQiymetlendir({
       cavab: duzgunCavab,
-      gozlenilenMaddeler: ["102.1.30"],
+      gozlenilenMaddeler: ["102.1.30-1"],
       kritikMeqamlar: ["45 000 AZN-dək dövriyyəsi olan 13 xidmət sahəsində işçi sayı tələbi yoxdur (0 işçi ilə tətbiq edilir)"]
     });
     assert.strictEqual(duzgunQiymet.ugurlu_mu, true, "Düzgün həll uğurlu qeydə alınmalıdır");
@@ -277,6 +314,7 @@ async function test(ad, fn) {
 
     // 4) Baza saxlanışı və statistika yoxlanışı
     const simQeyd = db.simulyasiyaSaxla({
+      yoxlanib: 1,
       sahe_id: "vergi_muhasibat",
       basliq: "Mikro Sahibkar Sınağı",
       ssenari: "Konsaltinq 0 işçi keysi",
@@ -659,15 +697,525 @@ async function test(ad, fn) {
       sohbetdeSaxla: false
     });
 
-    // 1) İnkar edilən qaimə və ya əlaqəsiz aksiz qaydaları cavaba qarışmamalıdır
-    assert.ok(!res.cavab.metn.includes("163.2"), "Qaimə inkar edildiyi halda 163.2 ləğv qaydası qarışmamalıdır");
+    // 1) Əlaqəsiz aksiz qaydası cavaba qarışmamalıdır
     assert.ok(!res.cavab.metn.includes("Aksizli"), "Əlaqəsiz aksizli mallar qaydası çıxarılmamalıdır");
 
-    // 2) Maddə 109.8-in 2% limiti və mallar/xidmətlər fərqi dəqiq təqdim olunmalıdır
-    assert.ok(res.cavab.metn.includes("109.8"), "Maddə 109.8-ə istinad olmalıdır");
-    assert.ok(res.cavab.metn.includes("2 faiz"), "İllik 2% limit qaydası göstərilməlidir");
-    assert.ok(res.cavab.metn.includes("Xidmət"), "Xidmətlərin kassa çeki ilə xərcə salınmaması qeyd edilməlidir");
+    // 2) Axtarış Maddə 109.8-in mətnini tapmalıdır
+    assert.ok(res.sitatlar.some(s => /109\.8/.test(`${s.basliq} ${s.metn}`)), "Maddə 109.8 mənbələrdə olmalıdır");
+
+    // 3) AI əlçatan deyilsə hazır "hökm" verilmir və bu açıq bildirilir
+    assert.equal(res.aiCavabVerdi, false);
+    assert.ok(res.cavab.metn.includes("AI cavab vermədi"));
+    assert.notEqual(res.etibarliliqKod, "yuksek");
   });
+
+  await test("31. Sual öyrənilmir; yalnız açıq əmr qalıcı qayda yaradır", async () => {
+    const agent = require("../src/agent");
+    const say = () => db.yaddaslariAl("vergi_muhasibat").length;
+    for (const sual of [
+      "Bu xərc mənfəət vergisində gəlirdən çıxılan xərc kimi qəbul edilir?",
+      "ƏDV-ni nağd ödəmək səhvdir, yoxsa qanun buna icazə verir?",
+      "Müqavilədə tarix göstərilməyibsə bu düzgün deyil sayılır"
+    ]) {
+      const evvel = say();
+      await agent.agentSualCavabla({ sual, sahe_id: "vergi_muhasibat", sohbetdeSaxla: false });
+      assert.equal(say(), evvel, `Sual qalıcı yaddaşa yazıldı: ${sual}`);
+    }
+    assert.equal(agent.oyrenmeNiyyetiTeyinEt("Bu hesablama səhvdir, güzəşt işçi sayından asılıdır.").duzelisNamizedi, true);
+    assert.ok(agent.oyrenmeNiyyetiTeyinEt("Düzəliş: güzəşt üçün ən azı 3 işçi lazımdır.").duzelisEmri);
+  });
+
+  await test("32. AI-nin çıxardığı qeyd rəsmi maddəyə oxşasa da təsdiqsiz qalıcı olmur", () => {
+    for (const menbe of ["Agent Analizi", "Avtonom Tədqiqat", "Simulyasiya Sınağı", "Avto-Öyrənmə (x)"]) {
+      const y = db.yaddasElaveEt({ metn: `__T32 ${menbe} Kənd təsərrüfatı istehsalçıları torpaq vergisindən tam azaddır (Maddə 206).`, menbe, status: "tesdiqlenmis", etibar_seviyyesi: "orijinal_menbe" });
+      assert.equal(y.status, "qaralama", menbe);
+      assert.notEqual(y.etibar_seviyyesi, "orijinal_menbe");
+    }
+  });
+
+  await test("33. Fərqli rəqəmli qaydalar ayrı qalır; silinən qeyd geri qaytarılır", async () => {
+    const a = db.yaddasElaveEt({ metn: "__T33 Alfa müştərisinə endirim dərəcəsi 5 faiz tətbiq olunsun", menbe: "Əl ilə əlavə" });
+    const b = db.yaddasElaveEt({ metn: "__T33 Alfa müştərisinə endirim dərəcəsi 25 faiz tətbiq olunsun", menbe: "Əl ilə əlavə" });
+    assert.notEqual(a.id, b.id);
+    await consolidator.yaddasiKonsolidasiyaEt({ aiIstifadeEt: false });
+    assert.ok(db.yaddaslariAl().some(y => y.id === a.id) && db.yaddaslariAl().some(y => y.id === b.id));
+    db.yaddasSil(a.id);
+    assert.ok(!db.yaddaslariAl().some(y => y.id === a.id));
+    assert.ok(db.yaddasZibiliAl().some(y => y.id === a.id));
+    assert.equal(db.yaddasBerpaEt(a.id).status, "tesdiqlenmis");
+  });
+
+  await test("34. Şəxsi qeyd qanun dəyişikliyi sayılmır; eyni adlı qeyd köhnəni silmir", () => {
+    const evolution = require("../src/evolution");
+    const t = evolution.qanunDeyisikliyiYoxlaVeArxivle({ senedAdi: "Şəxsi fikrim", xamMetn: "Cədvəldə dəyişiklik lazımdır. Maddə 175 və 163.2 barədə sonra baxacam.", sahe_id: "vergi_muhasibat" });
+    assert.equal(t.deyisiklikTapildi, false);
+    const mk = (m) => db.menbeElaveEt({ qovluq_id: "qovluq-sexsi", ad: "__T34 Qeyd", nov: "qeyd", xam_metn: m, parcalar: [{ metn: m }] });
+    const n1 = mk("Birinci qeyd: görüş cümə günü saat 16:00-da olacaq, unutma bunu.");
+    const n2 = mk("İkinci qeyd: ofis üçün üç noutbuk sifariş edilməlidir bu həftə.");
+    assert.notEqual(n1.id, n2.id);
+    assert.ok(db.menbeDetaliAl(n1.id));
+  });
+
+  await test("35. Ehtiyat nüsxədən bərpa qaralamaları təsdiqlənmiş etmir", () => {
+    const say = () => JSON.stringify(db.db.prepare("SELECT status, sahe_id, COUNT(*) c FROM yaddas GROUP BY 1,2 ORDER BY 1,2").all());
+    const evvel = say();
+    db.bazaBackupBerpaEt(db.bazaBackupHazirla().buffer);
+    assert.equal(say(), evvel);
+  });
+
+  await test("36. Cavab yoxlaması uydurma maddə və rəqəmi tutur", () => {
+    const agent = require("../src/agent");
+    const kontekst = "Maddə 105. Verginin dərəcələri\n105.1. Müəssisələrin mənfəətindən 20 faiz dərəcəsi ilə vergi tutulur.";
+    const duz = agent.cavabiMenbeyleTutusdur({ cavab: "Maddə 105.1 üzrə dərəcə 20%-dir.", kontekst });
+    assert.deepEqual([duz.tapilmayanMaddeler, duz.tapilmayanReqemler], [[], []]);
+    const sehv = agent.cavabiMenbeyleTutusdur({ cavab: "Maddə 105.9 üzrə dərəcə 25%-dir, cərimə 700 manatdır.", kontekst });
+    assert.deepEqual(sehv.tapilmayanMaddeler, ["105.9"]);
+    assert.equal(sehv.tapilmayanReqemler.length, 2);
+  });
+
+  await test("37. Araşdırma yalnız qaralama yaradır, boşluq açıq qalır; saxta rəsmi ünvan tanınmır", async () => {
+    const web = require("../src/web-researcher");
+    assert.equal(web.linkResmidirmi("https://www.taxes.gov.az/az/page"), true);
+    assert.equal(web.linkResmidirmi("https://taxes.gov.az.saxta.com/x"), false);
+    assert.equal(web.linkResmidirmi("https://saxta.com/?s=e-qanun.az"), false);
+    const gap = db.bilikBosluguQeydEt({ sual: "__T37 nadir rüsum sualı haqqında araşdırma", menbe: "Test" });
+    const fetchFn = async (u) => ({ ok: true, text: async () => String(u).includes("duckduckgo")
+      ? '<div class="result__body"><a class="result__a" href="https://taxes.gov.az/x">Rəsmi</a><div class="result__snippet">nadir rüsum</div></div>'
+      : "<p>Nadir rüsum sualı üzrə rəsmi izah mətni buradadır.</p>" });
+    const n = await web.bosluguIyerarxikArasdir({ bosluqId: gap.id, sual: gap.sual, sahe_id: "vergi_muhasibat", fetchFn });
+    assert.equal(n.yaddasQeydi.status, "qaralama");
+    assert.ok(n.yaddasQeydi.metn.includes("rəsmi izah mətni"));
+    const aciq = () => db.bilikBosluqlariniAl(100).some(b => b.id === gap.id);
+    assert.ok(aciq(), "Təsdiqdən əvvəl boşluq açıq qalmalıdır");
+    db.qaralamaTesdiqle(n.yaddasQeydi.id);
+    assert.ok(!aciq(), "Təsdiqdən sonra bağlanmalıdır");
+  });
+
+  await test("38. Yoxlanmamış sınaq 'uğurlu' sayılmır və statistikaya düşmür", async () => {
+    const simulator = require("../src/simulator");
+    const evvel = db.simulyasiyaStatistikaAl("vergi_muhasibat").umumi;
+    const n = await simulator.simulyasiyaIcraEt({ ssenariId: "sim-case-1", saheId: "vergi_muhasibat" });
+    assert.equal(n.yoxlanib, 0);
+    assert.equal(n.ugurlu_mu, 0);
+    assert.equal(n.saxlanilanDersler.length, 0);
+    assert.equal(db.simulyasiyaStatistikaAl("vergi_muhasibat").umumi, evvel);
+  });
+
+  await test("39. Müfəttişin sübutsuz 'düzəlişi' rədd edilir, sübutlu olan qəbul edilir", () => {
+    const agent = require("../src/agent");
+    const sitatlar = [
+      { nomre: 1, basliq: "Maddə 58. Sanksiyalar", metn: "58.10. işəgötürənə hər bir belə şəxs üzrə birinci dəfə yol verdikdə 2000 manat, ikinci dəfə yol verdikdə 4000 manat, üç və daha çox dəfə yol verdikdə 6000 manat məbləğində maliyyə sanksiyası tətbiq edilir." },
+      { nomre: 2, basliq: "Maddə 115. Təmir xərcləri", metn: "115.1. binalar qalıq dəyərinin 2 faizi, maşınlar 5 faizi həddi ilə məhdudlaşdırılır." },
+      { nomre: 3, basliq: "Maddə 220. Dərəcələr", metn: "220.1-1. ticarət fəaliyyəti üzrə 6 faiz dərəcə ilə hesablanır." }
+    ];
+    const cavab = "Maddə 58.10: 2000, 4000, 6000 manat. Maddə 115.1: 2 faiz və 5 faiz.";
+    const yoxla = (d) => agent.criticDuzelisiniYoxla(d, sitatlar, cavab);
+    // canlı imtahanda çıxan yanlış iddialar
+    assert.equal(yoxla({ qeyd: "Cari qanunvericiliyə görə 1-ci dəfə 4000, 2-ci dəfə 6000, 3-cü halda 8000 manatdır.", menbe_nomresi: 1, sitat: "birinci dəfə yol verdikdə 2000 manat, ikinci dəfə" }), null);
+    assert.equal(yoxla({ qeyd: "Maddə 115.1-ə dəyişikliklə vahid 6 faizlik hədd müəyyən edilib.", menbe_nomresi: 2, sitat: "binalar qalıq dəyərinin 2 faizi, maşınlar 5 faizi" }), null);
+    assert.equal(yoxla({ qeyd: "Maddə 115.1-ə dəyişikliklə vahid 6 faizlik hədd müəyyən edilib.", menbe_nomresi: 3, sitat: "ticarət fəaliyyəti üzrə 6 faiz dərəcə ilə" }), null);
+    assert.equal(yoxla({ qeyd: "İstinad edilən mənbə mövcud deyil, düzəliş lazımdır.", menbe_nomresi: 1, sitat: "mətndə olmayan uydurma sitat parçası burada" }), null);
+    // əsaslandırılmış qeyd
+    const duz = yoxla({ qeyd: "Maddə 58.10-da sanksiya hər bir belə şəxs üzrə tətbiq olunur, bu şərt yazılmayıb.", menbe_nomresi: 1, sitat: "işəgötürənə hər bir belə şəxs üzrə birinci dəfə" });
+    assert.equal(duz.nomre, 1);
+  });
+
+  await test("40. Əsas cavab və detallı hissə ayrı yoxlanır; faktiki suala əlavə sual açılmır", () => {
+    const agent = require("../src/agent");
+    const cognition = require("../src/cognition");
+    const h = agent.cavabiHisselereAyir("Əsas 20%.\n<DETALLI_ANALIZ>Maddə 58.1 50%.</DETALLI_ANALIZ>\n<NOVBETI_SUALLAR>- 99%?</NOVBETI_SUALLAR>");
+    assert.ok(h.esas.includes("20%") && !h.esas.includes("58.1") && !h.esas.includes("99%"));
+    assert.ok(h.detalli.includes("58.1"));
+    for (const sual of ["ƏDV neçə faizdir?", "Vergi orqanı neçə il ərzində vergini yenidən hesablaya bilər?", "Sadələşdirilmiş verginin əsas dərəcəsi nə qədərdir?"]) {
+      assert.equal(cognition.yarimciqSualAnalizEt({ sual, saheId: "vergi_muhasibat" }).yarimciqdir, false, sual);
+    }
+  });
+
+  await test("41. Limit və məşğulluq verən model bir müddət ötürülür", async () => {
+    const aiM = require("../src/ai");
+    aiM.modelFasileleriniSifirla();
+    const siyahi = ["m1", "m2", "m3"];
+    await aiM.xetayaGoreFasile("m1", new Response('{"error":{"details":[{"retryDelay":"30s"}]}}', { status: 429 }));
+    await aiM.xetayaGoreFasile("m2", new Response("busy", { status: 503 }));
+    assert.deepEqual(aiM.sinanacaqModeller(siyahi), ["m3"]);
+    await aiM.xetayaGoreFasile("m3", new Response("busy", { status: 503 }));
+    assert.equal(aiM.sinanacaqModeller(siyahi).length, 2);
+    aiM.modelFasileleriniSifirla();
+  });
+
+  await test("42. Düşünən assistent: özü oxuyur, özünü yoxlayır, razılıqsız öyrənmir", async () => {
+    const agent = require("../src/agent");
+    const dusunen = require("../src/dusunen");
+    require("../src/ai").modelFasileleriniSifirla();
+    const kohneFetch = globalThis.fetch;
+    const sorgular = [];
+    let ssenari = [];
+    const model = (parts) => new Response(JSON.stringify({ candidates: [{ content: { role: "model", parts } }] }), { status: 200 });
+    const cagir = (name, args, id) => ({ functionCall: { name, args, id }, thoughtSignature: "imza-" + id });
+    globalThis.fetch = async (u, o) => {
+      if (!String(u).includes("generateContent")) throw new Error("bağlı");
+      const govde = JSON.parse(o.body);
+      sorgular.push(govde);
+      return model(ssenari.shift()(govde));
+    };
+    db.tenzimlemeYenile({ gemini_api_key: "TEST-KEY-0123456789012345", dusunen_rejim: "1" });
+    try {
+      // 1) maddəni özü oxuyur, uydurma rəqəmi özü düzəldir, öyrəndiyini yalnız təklif edir
+      ssenari = [
+        () => [cagir("madde_oxu", { nomre: "105.1" }, "a1")],
+        () => [cagir("yadda_saxla_teklif", { metn: "__T42 İstifadəçinin şirkəti MMC formasındadır", nov: "haqqimda" }, "a2")],
+        () => [{ text: "Mənfəət vergisi 27 faizdir [1]." }],
+        (g) => {
+          assert.ok(JSON.stringify(g.contents.at(-1)).includes("özünüyoxlama"));
+          return [{ text: "Mənfəət vergisi 20 faizdir [1]. Şirkətinizin MMC olduğunu yadda saxlayım?" }];
+        }
+      ];
+      const n = await agent.agentSualCavabla({ sual: "Bizim MMC mənfəətdən nə qədər vergi ödəməlidir?", sahe_id: "vergi_muhasibat", sohbetdeSaxla: false });
+      assert.equal(n.dusunenRejim, true);
+      assert.ok(n.cavab.metn.includes("20 faiz") && !n.cavab.metn.includes("27 faiz"));
+      assert.ok(!n.cavab.metn.includes("Konkret və Qısa Cavab"));
+      assert.equal(n.etibarliliqKod, "yuksek");
+      assert.ok(n.sitatlar.some(s => /105/.test(s.basliq)));
+      const imzaQayidib = sorgular[1].contents.some(c => c.parts.some(p => p.thoughtSignature === "imza-a1"));
+      assert.ok(imzaQayidib, "Düşüncə imzası modelə qaytarılmalıdır");
+      const teklif = db.qaralamaYaddaslariAl("vergi_muhasibat").find(y => y.metn.includes("__T42"));
+      assert.ok(teklif, "Öyrənilən şey təklif kimi qalmalıdır");
+
+      assert.ok(n.cavab.metn.includes("Yadda saxlamağı təklif edirəm") && n.cavab.metn.includes("__T42"), "Təklifin mətni istifadəçiyə göstərilməlidir");
+      db.sohbetElaveEt({ rol: "user", metn: "Bizim MMC mənfəətdən nə qədər vergi ödəməlidir?", sahe_id: "vergi_muhasibat" });
+      db.sohbetElaveEt({ rol: "assistant", metn: n.cavab.metn, sahe_id: "vergi_muhasibat" });
+
+      // 2) razılıq verilməyibsə model özü təsdiqləyə bilməz
+      ssenari = [() => [cagir("qeydi_tesdiqle", { id: teklif.id }, "b1")], () => [{ text: "Yaxşı." }]];
+      await agent.agentSualCavabla({ sual: "Bəs ƏDV barədə nə deyə bilərsən?", sahe_id: "vergi_muhasibat", sohbetdeSaxla: false });
+      assert.ok(db.qaralamaYaddaslariAl("vergi_muhasibat").some(y => y.id === teklif.id));
+
+      // 3) "bəli" deyəndə yaddaşa keçir, "unut" deyəndə zibil qutusuna gedir
+      ssenari = [() => [cagir("qeydi_tesdiqle", { id: teklif.id }, "c1")], () => [{ text: "Yadda saxladım." }]];
+      await agent.agentSualCavabla({ sual: "Bəli, yadda saxla", sahe_id: "vergi_muhasibat", sohbetdeSaxla: false });
+      assert.ok(db.yaddaslariAl("vergi_muhasibat").some(y => y.id === teklif.id));
+      ssenari = [(g) => { assert.ok(g.systemInstruction.parts[0].text.includes("__T42")); return [cagir("qeydi_unut", { id: teklif.id }, "d1")]; }, () => [{ text: "Unutdum." }]];
+      await agent.agentSualCavabla({ sual: "Onu unut", sahe_id: "vergi_muhasibat", sohbetdeSaxla: false });
+      assert.ok(db.yaddasZibiliAl().some(y => y.id === teklif.id));
+      assert.equal(dusunen.razilasir("yox, lazım deyil"), false);
+
+      // 4) AI əlçatmazdırsa köhnə yol işləyir
+      require("../src/ai").modelFasileleriniSifirla();
+      globalThis.fetch = async () => { throw new Error("bağlı"); };
+      const f2 = await agent.agentSualCavabla({ sual: "ƏDV neçə faizdir?", sahe_id: "vergi_muhasibat", sohbetdeSaxla: false });
+      assert.equal(f2.aiCavabVerdi, false);
+    } finally {
+      globalThis.fetch = kohneFetch;
+      db.tenzimlemeYenile({ gemini_api_key: "", dusunen_rejim: "0" });
+      require("../src/ai").modelFasileleriniSifirla();
+    }
+  });
+
+  await test("43. Canlı sınaqdakı hallar: mövzudan çıxma, razılıq boşluğu, maaş izahı", async () => {
+    const agent = require("../src/agent");
+    const dusunen = require("../src/dusunen");
+    const calcM = require("../src/calculator");
+    require("../src/ai").modelFasileleriniSifirla();
+    const kohneFetch = globalThis.fetch;
+    let ssenari = [];
+    globalThis.fetch = async (u, o) => {
+      if (!String(u).includes("generateContent")) throw new Error("bağlı");
+      const parts = ssenari.shift()(JSON.parse(o.body));
+      return new Response(JSON.stringify({ candidates: [{ content: { role: "model", parts } }] }), { status: 200 });
+    };
+    db.tenzimlemeYenile({ gemini_api_key: "TEST-KEY-0123456789012345", dusunen_rejim: "1" });
+    const sor = (sual) => agent.agentSualCavabla({ sual, sahe_id: "vergi_muhasibat", sohbetdeSaxla: false });
+    try {
+      // a) özünüyoxlamadan sonra model başqa mövzuya keçirsə, ilk cavab qalır
+      const ilk = "İcarəyə verən VÖEN-li sahibkardırsa, icarə haqqının ödənilməsi zamanı sahibkarın qeydiyyatını və icarə müqaviləsini yoxlayın. Güman edirəm 77 faiz məsələsi də var.";
+      ssenari = [
+        () => [{ text: ilk }],
+        (g) => {
+          assert.ok(g.contents.at(-1).parts[0].text.includes("Bəs o adam VÖEN-li sahibkar olsa?"), "Özünüyoxlama sualı xatırlatmalıdır");
+          return [{ text: "Kassa çeki ilə alınan mallar üzrə gəlirdən çıxılan xərclər iki faizlə məhdudlaşır, xidmətlər isə çıxılmır." }];
+        }
+      ];
+      const r = await sor("Bəs o adam VÖEN-li sahibkar olsa?");
+      assert.ok(r.cavab.metn.startsWith("İcarəyə verən VÖEN-li"), "Mövzudan çıxan variant qəbul edilməməlidir");
+
+      // b) eyni cavabda həm təklif, həm təsdiq mümkün deyil
+      let tesdiqNeticesi = "";
+      ssenari = [
+        () => [{ functionCall: { name: "yadda_saxla_teklif", args: { metn: "__T43 İstifadəçi ofisi Gəncədə icarəyə götürür", nov: "haqqimda" }, id: "1" } }],
+        (g) => {
+          const id = g.contents.at(-1).parts[0].functionResponse.response.result.id;
+          return [{ functionCall: { name: "qeydi_tesdiqle", args: { id }, id: "2" } }];
+        },
+        (g) => { tesdiqNeticesi = JSON.stringify(g.contents.at(-1)); return [{ text: "Qeyd etdim." }]; }
+      ];
+      const r2 = await sor("Bəli, yadda saxla.");
+      assert.ok(tesdiqNeticesi.includes("görməyib"));
+      const q = db.qaralamaYaddaslariAl("vergi_muhasibat").find(y => y.metn.includes("__T43"));
+      assert.ok(q, "Göstərilməmiş təklif qaralamada qalmalıdır");
+
+      // göstəriləndən sonra qısa "bəli, yadda saxla" onu təsdiqləyir (model alət çağırmasa belə)
+      db.sohbetElaveEt({ rol: "assistant", metn: r2.cavab.metn, sahe_id: "vergi_muhasibat" });
+      ssenari = [() => [{ text: "Yadda saxladım." }]];
+      await sor("Bəli, yadda saxla.");
+      assert.ok(db.yaddaslariAl("vergi_muhasibat").some(y => y.id === q.id));
+
+      // c) qanun müddəası yaddaşa təklif olunmur
+      let redd = "";
+      ssenari = [
+        () => [{ functionCall: { name: "yadda_saxla_teklif", args: { metn: "VÖEN-li sahibkara ödənişdə 14% vergi tutulmur", nov: "haqqimda" }, id: "3" } }],
+        (g) => { redd = JSON.stringify(g.contents.at(-1)); return [{ text: "Aydındır." }]; }
+      ];
+      await sor("Aydın oldu, davam edək.");
+      assert.ok(redd.includes("qanun müddəasıdır"));
+
+      // d) istifadəçinin faktı model unutsa da təklif olunur
+      ssenari = [() => [{ text: "Qəbul etdim." }]];
+      const r3 = await sor("Nəzərə al ki, şirkətim ƏDV ödəyicisidir və 4 işçimiz var.");
+      assert.ok(r3.cavab.metn.includes("şirkətim ƏDV ödəyicisidir və 4 işçimiz var"));
+      assert.equal(dusunen.istifadeciFakti("Mənfəət vergisi 18 faizdir, elə deyil?"), null);
+
+      // e) kalkulyator izahı sektorun öz dərəcələrini yazır
+      const izah = calcM.hesablamaIzahi(calcM.maasGrossdanNeteOzel(3000, 2026)).join(" | ");
+      assert.ok(izah.includes("75 manat + 2500-dən yuxarı hissənin 10%-i = 125 manat"), izah);
+      assert.ok(!izah.includes("25%") && !izah.includes("14%"));
+      assert.ok(calcM.hesablamaIzahi(calcM.maasGrossdanNeteDovlet(3000, 2026)).join(" ").includes("25%-i"));
+    } finally {
+      globalThis.fetch = kohneFetch;
+      db.tenzimlemeYenile({ gemini_api_key: "", dusunen_rejim: "0" });
+      require("../src/ai").modelFasileleriniSifirla();
+    }
+  });
+
+  await test("44. Gündəlik icmal: dəyişiklik tarixləri, uyğunsuzluq, gündə bir bildiriş, 'icmal göndər'", async () => {
+    const icmal = require("../src/icmal");
+    const scheduler = require("../src/scheduler");
+    const agent = require("../src/agent");
+    const sahe = db.saheYarat({ ad: "T44 sınaq sahəsi", kod: "t44_" + Date.now() });
+    const mk = (ad, metn, parcalar) => db.menbeElaveEt({ qovluq_id: "qovluq-is", sahe_id: sahe.id, ad, nov: "txt", xam_metn: metn, parcalar });
+    const bend = "Maddə 900. Sınaq dərəcəsi\n900.1. Vergi 12 faiz dərəcə ilə tutulur.\n900.1-1. Güzəştli dərəcə 6 faizdir.\n900.2. Başqa hal 30 faiz.\n(900.1-ci maddəyə dəyişiklik 2027-ci il yanvarın 1-dən qüvvəyə minir.)";
+    const resmi = mk("T44 Məcəlləsi", bend + "\n" + "x ".repeat(32000), [{ basliq: "Maddə 900. Sınaq dərəcəsi", metn: bend }]);
+    mk("T44 icmal xülasəsi", "1. Maddə 900.1 (köhnə):\n- Vergi 25% tutulur.\n- Güzəştli 6 faiz.\n2. Başqa bölmə\n- 99% sığorta", [{ metn: "xülasə" }]);
+
+    const h = icmal.icmalHazirla({ saheId: sahe.id, vaxt: Date.parse("2026-11-27T06:00:00Z") });
+    assert.deepEqual(h.deyisiklikler.map(d => [d.tarix, d.qalan, d.maddeler]), [["2027-01-01", 35, ["900.1"]]]);
+    assert.deepEqual(h.ziddiyyetler.map(z => [z.madde, z.faizler]), [["900.1", ["25"]]]);
+    assert.equal(h.xerite.cemi, 1);
+    icmal.maddeBaxildi(sahe.id, "900.1");
+    assert.equal(icmal.xeriteXulasesi(sahe.id).baxilan, 1);
+
+    for (const s of ["icmal göndər", "İcmal göndər.", "/icmal", "gündəlik icmalı ver"]) assert.ok(icmal.icmalEmridirmi(s), s);
+    for (const s of ["icmal vergi nədir?", "Bu icmal səhvdir, göndər düzəlişi"]) assert.ok(!icmal.icmalEmridirmi(s), s);
+    const r = await agent.agentSualCavabla({ sual: "icmal göndər", sahe_id: sahe.id, sohbetdeSaxla: false });
+    assert.ok(r.icmal && r.cavab.metn.includes("Gündəlik icmal"));
+
+    const kohneSahe = db.aktivSaheIdAl();
+    db.aktivSaheDeyis(sahe.id);
+    try {
+      db.tenzimlemeYenile({ icmal_son_acar: "" });
+      const say = () => scheduler.vebBildirisleriAl().filter(b => b.nov === "icmal").length;
+      const evvel = say();
+      assert.ok(scheduler.gundelikIcmalYoxla());
+      assert.equal(scheduler.gundelikIcmalYoxla(), null);
+      assert.equal(say(), evvel + 1);
+      assert.ok(db.db.prepare("SELECT COUNT(*) c FROM bildirisler").get().c >= 1, "Bildiriş bazada qalmalıdır");
+    } finally {
+      db.aktivSaheDeyis(kohneSahe);
+      db.menbeSil(resmi.id);
+    }
+  });
+
+  await test("45. Öyrənmə dövrəsi: yalnız sitatla sübut olunan fikir saxlanılır, mətn dəyişəndə yenidən öyrənilir", async () => {
+    const oyrenme = require("../src/oyrenme");
+    const icmal = require("../src/icmal");
+    const agent = require("../src/agent");
+    require("../src/ai").modelFasileleriniSifirla();
+    const sahe = db.saheYarat({ ad: "T45 sınaq sahəsi", kod: "t45_" + Date.now() });
+    const m901 = "901.1. Güzəşt yalnız orta aylıq işçi sayı 3 nəfərdən az olmayan şəxslərə tətbiq edilir və gəlirin 75 faizi vergidən azaddır.";
+    const m902 = "902.1. Hesabat rüb başa çatdıqdan sonrakı ayın 20-dək 901-ci maddəyə uyğun təqdim edilir.";
+    const qur = (a) => db.menbeElaveEt({ qovluq_id: "qovluq-is", sahe_id: sahe.id, ad: "T45 Məcəlləsi", nov: "txt", xam_metn: "x ".repeat(32000) + `\nMaddə 901. Güzəşt\n${a}\nMaddə 902. Hesabat\n${m902}\n`,
+      parcalar: [{ basliq: "Maddə 901. Güzəşt", metn: a }, { basliq: "Maddə 902. Hesabat", metn: m902 }] });
+    const menbe = qur(m901);
+    const kohneFetch = globalThis.fetch;
+    const gonderilen = [];
+    let cavabQur = null;
+    globalThis.fetch = async (u, o) => {
+      if (!String(u).includes("generateContent")) throw new Error("bağlı");
+      const govde = JSON.parse(o.body);
+      gonderilen.push(govde.contents[0].parts[0].text);
+      return cavabQur(String(u));
+    };
+    const json = (obj) => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(obj) }] } }] }), { status: 200 });
+    db.tenzimlemeYenile({ gemini_api_key: "TEST-KEY-0123456789012345", oyrenme_limiti: "5" });
+    try {
+      // üstünlük: istinad edilən 901 birinci, sizin baxdığınız maddə hamıdan öndə
+      assert.equal(oyrenme.novbetiMovzular(sahe.id, 2)[0].madde, "901");
+      icmal.maddeBaxildi(sahe.id, "902");
+      assert.equal(oyrenme.novbetiMovzular(sahe.id, 2)[0].madde, "902");
+
+      cavabQur = () => json({
+        fikirler: [
+          { fikir: "Güzəşt üçün ən azı 3 işçi lazımdır, 75 faiz azaddır.", sitat: "orta aylıq işçi sayı 3 nəfərdən az olmayan şəxslərə tətbiq edilir və gəlirin 75 faizi" },
+          { fikir: "Güzəşt 50 faizdir və işçi şərti yoxdur.", sitat: "orta aylıq işçi sayı 3 nəfərdən az olmayan şəxslərə tətbiq edilir" },
+          { fikir: "Uydurma qayda barədə fikir.", sitat: "mətndə heç olmayan uydurma sitat parçasıdır" }
+        ],
+        sual: "2 işçi ilə olarmı?", cavab: "Olmaz, ən azı 3 nəfər tələb olunur.", cavab_sitati: "orta aylıq işçi sayı 3 nəfərdən az olmayan",
+        aydin_olmayan: ["Orta say necə hesablanır?"]
+      });
+      const movzu = oyrenme.novbetiMovzular(sahe.id, 5).find(x => x.madde === "901");
+      const n = await oyrenme.movzunuOyren(sahe.id, movzu, db.tenzimlemeleriAl());
+      assert.deepEqual([n.ok, n.fikirSayi, n.redd], [true, 1, 2]);
+      const q = oyrenme.maddeQeydleri(sahe.id, "901.1");
+      assert.equal(q.length, 1);
+      assert.ok(!JSON.stringify(q).includes("50 faiz"));
+      assert.ok(!oyrenme.novbetiMovzular(sahe.id, 5).some(x => x.madde === "901"), "Öyrənilmiş maddə təkrar seçilməməlidir");
+
+      const goster = await agent.agentSualCavabla({ sual: "nə öyrəndin 901", sahe_id: sahe.id, sohbetdeSaxla: false });
+      assert.ok(goster.cavab.metn.includes("ən azı 3 işçi") && goster.cavab.metn.includes("Sitat"));
+      const icm = icmal.metnKimi(icmal.icmalHazirla({ saheId: sahe.id }));
+      assert.ok(icm.includes("Son sutkada öyrəndiklərim") && icm.includes("Orta say necə hesablanır?"));
+
+      // limit dolubsa sessiya dayanır, heç nə uydurulmur
+      require("../src/ai").modelFasileleriniSifirla();
+      gonderilen.length = 0;
+      cavabQur = () => new Response('{"error":"quota PerDay"}', { status: 429 });
+      const s = await oyrenme.oyrenmeSessiyasi({ saheId: sahe.id, say: 5, fasileMs: 0 });
+      assert.equal(s.oyrenilen.length, 0);
+      assert.ok(gonderilen.length <= 2, "Limitdən sonra başqa mövzular sınanmamalıdır");
+      assert.ok(gonderilen.every(g => g.includes("902.1.")), "Yalnız rəsmi maddə mətni göndərilməlidir");
+
+      // mətn dəyişəndə köhnə qeyd etibarsız olur və maddə yenidən növbəyə düşür
+      qur(m901.replace("3 nəfərdən", "5 nəfərdən"));
+      assert.equal(oyrenme.maddeQeydleri(sahe.id, "901").length, 0);
+      assert.ok(oyrenme.novbetiMovzular(sahe.id, 5).some(x => x.madde === "901"));
+
+      for (const [e, nov] of [["öyrən", "oyren"], ["Nə öyrəndin?", "goster"], ["qeydi sil 901", "sil"]]) assert.equal(oyrenme.emriTani(e)?.nov, nov, e);
+      assert.equal(oyrenme.emriTani("ƏDV-ni necə öyrənim?"), null);
+      db.tenzimlemeYenile({ oyrenme_limiti: "0" });
+      assert.equal(oyrenme.aktivdirmi(), false);
+    } finally {
+      globalThis.fetch = kohneFetch;
+      db.tenzimlemeYenile({ gemini_api_key: "", oyrenme_limiti: "0" });
+      db.menbeSil(menbe.id);
+      db.db.prepare("DELETE FROM bilik_qeydleri WHERE sahe_id = ?").run(sahe.id);
+      require("../src/ai").modelFasileleriniSifirla();
+    }
+  });
+
+  await test("46. Öyrənmə keyfiyyəti: təkrarsız mətn, bənddən bölmə, dəyişiklik qeydi, əhatə, boş sualların atılması", async () => {
+    const oyrenme = require("../src/oyrenme");
+    const icmal = require("../src/icmal");
+    require("../src/ai").modelFasileleriniSifirla();
+    const sahe = db.saheYarat({ ad: "T46 sınaq sahəsi", kod: "t46_" + Date.now() });
+    const bend = (n) => `910.${n}. Sınaq bəndi nömrə ${n} üzrə hesabat ${n} gün ərzində təqdim edilməlidir və bu müddət uzadılmır.`;
+    const bendler = Array.from({ length: 90 }, (_, i) => bend(i + 1));
+    const qeydSetri = "* (910.80-ci maddəyə edilmiş dəyişiklik 2027-ci il yanvarın 1-dən qüvvəyə minir.)";
+    bendler.splice(80, 0, qeydSetri);
+    const govde = `Maddə 910. Uzun maddə\n${bendler.join("\n")}\nXII fəsil. Başqa fəsil\nfəsil mətni`;
+    const menbe = db.menbeElaveEt({ qovluq_id: "qovluq-is", sahe_id: sahe.id, ad: "T46 Məcəlləsi", nov: "txt", xam_metn: "x ".repeat(32000) + "\n" + govde,
+      parcalar: [{ basliq: "Maddə 910. Uzun maddə", metn: govde.slice(0, 3000) }, { basliq: "Maddə 910. Uzun maddə (Hissə 2)", metn: govde.slice(2700) }] });
+    const kohneFetch = globalThis.fetch;
+    try {
+      const metn = oyrenme.maddeMetinleri(icmal.saheMenbeleri(sahe.id)).get("910").metn;
+      assert.equal(metn.split(bend(20)).length - 1, 1, "Mətn təkrarlanmamalıdır");
+      assert.ok(!metn.includes("fəsil mətni"));
+      const hisseler = oyrenme.hisselereBol(metn);
+      assert.ok(hisseler.length >= 2 && hisseler.every(h => h.length <= 4500));
+      assert.ok(hisseler.slice(1).every(h => /^(?:\*|910\.)/.test(h)), "Hissə bəndin əvvəlindən başlamalıdır");
+
+      // dəyişiklik qeydi olan hissə birinci seçilir
+      const movzu = oyrenme.novbetiMovzular(sahe.id, 1)[0];
+      assert.ok(movzu.metn.includes(qeydSetri) && movzu.hisse > 1, `hisse ${movzu.hisse}`);
+
+      db.tenzimlemeYenile({ gemini_api_key: "TEST-KEY-0123456789012345", oyrenme_limiti: "12" });
+      globalThis.fetch = async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({
+        fikirler: [{ fikir: "Hesabat 80 gün ərzində verilməlidir.", sitat: "Sınaq bəndi nömrə 80 üzrə hesabat 80 gün ərzində təqdim edilməlidir" }],
+        aydin_olmayan: ["132-ci maddə", "Bu müddət bayram günlərində necə hesablanır?"]
+      }) }] } }] }), { status: 200 });
+      const n = await oyrenme.movzunuOyren(sahe.id, movzu, db.tenzimlemeleriAl());
+      assert.equal(n.ehateSayi, 1);
+      assert.ok(n.bendSayi > 5 && n.deyisiklikSayi === 1);
+      const q = oyrenme.maddeQeydleri(sahe.id, "910")[0];
+      assert.deepEqual(q.aydin_olmayan, ["Bu müddət bayram günlərində necə hesablanır?"]);
+      assert.ok(q.deyisiklikler[0].includes("qüvvəyə minir"));
+      const goster = await oyrenme.emriIcraEt({ nov: "goster", madde: "910" }, sahe.id);
+      assert.ok(goster.includes("Dəyişiklik qeydləri") && goster.includes("bənddən 1-i"));
+      assert.equal(oyrenme.limitAl({}), 12);
+    } finally {
+      globalThis.fetch = kohneFetch;
+      db.tenzimlemeYenile({ gemini_api_key: "", oyrenme_limiti: "0" });
+      db.menbeSil(menbe.id);
+      db.db.prepare("DELETE FROM bilik_qeydleri WHERE sahe_id = ?").run(sahe.id);
+      require("../src/ai").modelFasileleriniSifirla();
+    }
+  });
+
+  await test("47. Öyrənmə dəqiqliyi: itmiş şərt/istisna/metod qanun mətni ilə əvəzlənir, sitat tam qalır", async () => {
+    const oyrenme = require("../src/oyrenme");
+    require("../src/ai").modelFasileleriniSifirla();
+    const sahe = db.saheYarat({ ad: "T47 sınaq sahəsi", kod: "t47_" + Date.now() });
+    const giris = "914.1. Amortizasiya olunan aktivlər üzrə düz xətt metodu ilə illik normalar aşağıdakı kimi müəyyən edilir:[8]";
+    const norma = "914.1.1. digər əsas vəsaitlər – 14 il.";
+    const istisnali = "914.2. Hüdud daxilində geri alınma ödənişləri (artan dəyər istisna olmaqla) dividend sayılmır, ehtiyat hesabı istisna olmaqla.";
+    const uzun = `914.3. Sahibkar ${"uzun şərtlər siyahısına uyğun olan və ".repeat(14)}qeydiyyatda olan şəxs ayırmanın 40 faizini çıxır.`;
+    const sade = "914.4. Təqdim edilən vəsaitdən yaranan fərq gəlirə daxil edilir.";
+    const maddeMetni = ["Maddə 914. Amortizasiya", giris, norma, istisnali, uzun, sade].join("\n");
+    const hisseMetni = [norma, istisnali, uzun, sade].join("\n"); // giriş cümləsi əvvəlki hissədə qalıb
+
+    assert.deepEqual(oyrenme.sitatinYeri(maddeMetni, norma, hisseMetni).giris, [giris.replace("[8]", "")]);
+    assert.deepEqual(oyrenme.sitatinYeri(maddeMetni, sade, hisseMetni).giris, []);
+    assert.deepEqual(oyrenme.itenSertler(sade, "Yaranan fərq gəlirə daxil edilir."), []);
+    assert.ok(oyrenme.itenSertler("2026-cı il yanvarın 1-dən sonra ayrılan vəsait", "Ayrılan vəsait").includes("tarix şərti düşüb"));
+
+    const movzu = { madde: "914", basliq: "Amortizasiya", hisse: 2, hisse_sayi: 2, imza: "t47", metn: hisseMetni, maddeMetni, sebeb: "sınaq" };
+    const json = (obj) => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(obj) }] } }] }), { status: 200 });
+    const teklif = {
+      fikirler: [
+        { fikir: "Digər əsas vəsaitlərin amortizasiya müddəti 14 ildir.", sitat: norma },
+        { fikir: "Hüdud daxilində geri alınma ödənişləri (artan dəyər istisna olmaqla) dividend sayılmır.", sitat: istisnali },
+        { fikir: "Sahibkar ayırmanın 40 faizini çıxır.", sitat: uzun },
+        { fikir: "Vəsait təqdim ediləndə yaranan fərq gəlirə daxil edilir.", sitat: sade }
+      ],
+      sual: "Müddət neçə ildir?", cavab: "Digər əsas vəsaitlər üçün 14 il.", cavab_sitati: norma
+    };
+    const sorgular = [];
+    const kohneFetch = globalThis.fetch;
+    let yoxlayici = () => json({ neticeler: [{ n: 1, uygun: false, sebeb: "kimə aid olduğu düşüb" }, { n: 2, uygun: true }] });
+    globalThis.fetch = async (u, o) => {
+      const metn = JSON.parse(o.body).contents[0].parts[0].text;
+      sorgular.push(metn);
+      return metn.startsWith("### CÜT") ? yoxlayici() : json(teklif);
+    };
+    db.tenzimlemeYenile({ gemini_api_key: "TEST-KEY-0123456789012345", oyrenme_limiti: "5" });
+    try {
+      const n = await oyrenme.movzunuOyren(sahe.id, movzu, db.tenzimlemeleriAl());
+      assert.ok(sorgular[0].includes("<KONTEKST>") && sorgular[0].includes("düz xətt metodu"), "Giriş cümləsi modelə verilməlidir");
+      assert.equal(sorgular.length, 2);
+      assert.ok(!sorgular[1].includes("14 ildir"), "Proqramın tutduğu fikir ikinci yoxlamaya göndərilmir");
+      assert.deepEqual([n.ok, n.fikirSayi, n.metnSayi, n.redd], [true, 4, 3, 0]);
+      const q = oyrenme.sonQeydler(sahe.id, 0, 1)[0];
+      const [a, b, c, d] = q.fikirler;
+      assert.ok(a.resmi_metn && a.sebeb.includes("metod") && a.fikir.includes("düz xətt metodu") && a.fikir.includes("14 il"));
+      assert.ok(b.resmi_metn && b.sebeb.includes("istisna") && b.fikir.includes("ehtiyat hesabı istisna olmaqla"));
+      assert.ok(c.resmi_metn && c.sebeb === "kimə aid olduğu düşüb" && c.fikir.includes("qeydiyyatda olan"));
+      assert.ok(!d.resmi_metn && !d.yoxlanmayib);
+      assert.ok(c.sitat.length > 500 && c.sitat.endsWith("40 faizini çıxır."), "Sitat kəsilməməlidir");
+      assert.equal(q.cavab, "", "Şərti itmiş cavab saxlanılmır");
+
+      // ikinci yoxlama alınmasa fikir "yoxlanmayıb" kimi nişanlanır
+      require("../src/ai").modelFasileleriniSifirla();
+      yoxlayici = () => new Response('{"error":"quota PerDay"}', { status: 429 });
+      const n2 = await oyrenme.movzunuOyren(sahe.id, movzu, db.tenzimlemeleriAl());
+      assert.deepEqual([n2.ok, n2.metnSayi, n2.yoxlanmayanSayi], [true, 2, 2]);
+      assert.ok(oyrenme.sonQeydler(sahe.id, 0, 1)[0].fikirler[3].yoxlanmayib);
+    } finally {
+      globalThis.fetch = kohneFetch;
+      db.tenzimlemeYenile({ gemini_api_key: "", oyrenme_limiti: "0" });
+      db.db.prepare("DELETE FROM bilik_qeydleri WHERE sahe_id = ?").run(sahe.id);
+      require("../src/ai").modelFasileleriniSifirla();
+    }
+  });
+
+  try { db.db.close(); fs.rmSync(testQovlugu, { recursive: true, force: true }); } catch (_) {}
 
   console.log(`\n======================================================`);
   console.log(`📊 TEST NƏTİCƏSİ: ${kecen} keçdi, ${ugursuz} uğursuz`);
