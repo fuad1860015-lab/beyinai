@@ -2445,13 +2445,48 @@ document.addEventListener("DOMContentLoaded", () => {
       tg_bot_token: document.getElementById("tenzTgToken")?.value?.trim() || ""
     });
     document.getElementById("modalTenzimlemeler").hidden = true;
-    if (prov === "gemini" && gKey && !gKey.startsWith("AIza")) {
-      bildirisGoster("⚠️ Diqqət: Gemini API açarı adətən 'AIzaSy...' ilə başlayır. Açarı yoxlayın.", 5500);
+    if (prov === "gemini" && gKey && !gKey.startsWith("AIza") && !gKey.startsWith("AQ.")) {
+      bildirisGoster("⚠️ Diqqət: Gemini API açarı 'AQ.' və ya 'AIzaSy...' ilə başlamalıdır. Açarı yoxlayın.", 5500);
     } else {
       bildirisGoster("💾 AI tənzimləmələri yadda saxlanıldı!");
     }
     melumatlariYenile();
   });
+
+  // Baza Backup Bərpa (Restore) Düyməsi Dinləyicisi
+  const inpBackup = document.getElementById("faylBackupBerpa");
+  if (inpBackup) {
+    inpBackup.addEventListener("change", async e => {
+      const fayl = e.target.files?.[0];
+      if (!fayl) return;
+      const statusEtiket = document.getElementById("etiketBackupStatus");
+      if (statusEtiket) statusEtiket.textContent = "⏳ Baza bərpa olunur, zəhmət olmasa gözləyin...";
+      try {
+        const reader = new FileReader();
+        reader.onload = async () => {
+          try {
+            const base64Data = String(reader.result).split(",")[1];
+            const res = await apiSorgu("/api/backup/berpa", "POST", { base64Data });
+            if (res && res.ok !== false) {
+              bildirisGoster(`✅ ${res.mesaj || "Baza uğurla bərpa edildi!"}`, 6000);
+              if (statusEtiket) statusEtiket.textContent = `✅ Bərpa edildi! (${res.menbeSayi || 0} mənbə, ${res.parcaSayi || 0} maddə)`;
+              melumatlariYenile();
+            } else {
+              bildirisGoster(`❌ Xəta: ${res?.xeta || "Bərpa edilə bilmədi"}`, 5000);
+              if (statusEtiket) statusEtiket.textContent = `❌ Xəta: ${res?.xeta || "Bərpa edilə bilmədi"}`;
+            }
+          } catch (sorXeta) {
+            bildirisGoster(`❌ Bərpa sorğusunda xəta: ${sorXeta.message}`, 5000);
+            if (statusEtiket) statusEtiket.textContent = "❌ Xəta baş verdi.";
+          }
+          inpBackup.value = "";
+        };
+        reader.readAsDataURL(fayl);
+      } catch (err) {
+        bildirisGoster(`❌ Fayl oxunarkən xəta: ${err.message}`, 5000);
+      }
+    });
+  }
 
   // Sol paneli aç/bağla (ChatGPT / Claude tərzi)
   const btnSolToggle = document.getElementById("btnSolPanelToggle");

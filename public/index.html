@@ -291,6 +291,18 @@
           <label>Xüsusi Sistem Təlimatı (İstəyə bağlı):</label>
           <textarea id="tenzSistemTelimati" rows="2" placeholder="Asistantın ümumi davranış qaydası..."></textarea>
         </div>
+        <div class="form-qrup" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--serhed-reng);">
+          <label style="font-weight:600;">💾 Baza və Yüklənmiş Məcəllələrin Qorunması (Backup):</label>
+          <p style="font-size:11px;color:var(--metn-solgun);margin-bottom:8px;">Yüklədiyiniz bütün məcəllələri və qaydaları 1 kliklə kompüterə endirə və ya proqram yeniləndikdə dərhal geri bərpa edə bilərsiniz.</p>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <a href="/api/backup" class="duyme kicik" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;">📥 Baza Backup İxrac Et</a>
+            <label class="duyme kicik ikincili" style="cursor:pointer;margin:0;display:inline-flex;align-items:center;gap:4px;">
+              📤 Backup Bərpa Et (.sqlite)
+              <input type="file" id="faylBackupBerpa" accept=".sqlite,.db" style="display:none;" />
+            </label>
+          </div>
+          <span id="etiketBackupStatus" style="font-size:11px;display:block;margin-top:6px;color:var(--ugur-reng);"></span>
+        </div>
         <div class="modal-ayaq">
           <button type="submit" class="duyme esas">Yadda Saxla</button>
         </div>
