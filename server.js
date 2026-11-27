@@ -1312,7 +1312,7 @@ if (require.main === module) {
     console.log(`======================================================\n`);
 
     const tenz = db.tenzimlemeleriAl();
-    if (tenz.tg_bot_token) {
+    if (tenz.tg_bot_token || process.env.TELEGRAM_BOT_TOKEN || process.env.TG_BOT_TOKEN) {
       connectors.tgBaslat().catch(() => {});
     }
   });
