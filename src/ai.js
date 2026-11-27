@@ -513,7 +513,7 @@ async function llmCagir({ sistemPromptu, istifadeciPromptu, geminiFileParts = []
     ];
 
     const contents = [
-      ...tarixce.slice(-4).map(m => ({
+      ...tarixce.slice(-8).map(m => ({
         role: m.rol === "assistant" ? "model" : "user",
         parts: [{ text: m.metn }]
       })),

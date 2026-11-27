@@ -166,23 +166,38 @@ async function agentAxtarisPlaniQur(sual, aktivMenbeler = [], tenz = null, sonIs
   const dialoqSualidir = /^(?:salam|salam\s*aleykum|sabahınız\s*xeyir|hər\s*vaxtınız\s*xeyir|axşamınız\s*xeyir|necəsən|nətərsən|kimsən|özünü\s*təqdim|sağ\s*ol|təşəkkür|minnətdaram|çox\s*sağ\s*ol|hi|hello)\b/i.test(sual.trim());
 
   if (sonIstifadeciSuali && sonIstifadeciSuali !== sual && !dialoqSualidir) {
+    const yonlendirmeSualidir =
+      /(?:burdan|oradan|bundan|bu\s*(?:qanun|mənbə|maddə)(?:dan)?)\s*yox/i.test(sual) ||
+      /(?:yox|xeyr)[,\s]+(?:filan|başqa|[a-zçəıöğşü0-9.–-]+)\s*(?:qanun|məcəllə|maddə)/i.test(sual) ||
+      /(?:filan|başqa|[a-zçəıöğşü0-9.–-]+)\s*(?:qanun(?:dan|a)?|məcəllə(?:dən|yə)?|maddə(?:dən|yə)?)\s*(?:öyrən|bax|araşdır|əsaslan|keç|əsas\s*götür)/i.test(sual);
+
     const davamSualidir =
+      yonlendirmeSualidir ||
       /^(?:bəs|bes|və\s+bəs|onda|bu\s+halda|bəs\s+bu|bəs\s+onun|onun|onların|həmin|orada|buna\s+görə|belə\s+olduqda|yaxşı\s+bəs|bunun)\b/i.test(sual.trim()) ||
       /\b(?:həmin\s+halda|bu\s+halda|onun\s+üçün|həmin\s+maddə|yuxarıdakı|bu\s+zaman|o\s+zaman)\b/i.test(sual) ||
-      (/\b(?:istisna|cəriməsi|məsuliyyəti|müddəti|faizi|şərti)\b/i.test(sual) && sual.length < 50);
+      (/\b(?:istisna|cəriməsi|məsuliyyəti|müddəti|faizi|şərti|fərqi)\b/i.test(sual) && sual.length < 50);
 
     if (davamSualidir) {
       const evvelkiMaddeler = Array.from(
         String(sonIstifadeciSuali).matchAll(/(?:maddə\s*\d+[0-9.-]*|\b\d{1,3}\.\d+(?:\.\d+)*\b|\b\d+\s*000\b)/gi)
       ).map(m => m[0]);
       const evvelkiAcarlar = db.sozKokleri(sonIstifadeciSuali).map(k => k.tam).slice(0, 6);
-      const kontekstPrefiks = Array.from(new Set([...evvelkiMaddeler, ...evvelkiAcarlar])).join(" ").trim();
-      if (kontekstPrefiks) {
-        effektifSual = `${kontekstPrefiks} ${sual}`;
-        // Davam suallarında ("Bəs onun işçisi olmasa...") birləşmiş kontekstli sorğunu 1-ci əsas bucaq (çəki 1.0) et ki, mövzu itməsin!
-        sorguObyektleri[0].ceki = 0.65;
-        sorguObyektleri.unshift({ metn: effektifSual, nov: "dialoq", ceki: 1.05 });
+
+      if (yonlendirmeSualidir) {
+        // "burdan yox, Mülki Məcəllədən öyrən" halında: əvvəlki mövzu ilə yeni hədəf birləşdirilir!
+        const temizHedef = sual.replace(/(?:burdan|oradan|bundan|bu\s*(?:qanun|mənbə|maddə)(?:dan)?)\s*yox[,\s]*/gi, "").trim();
+        effektifSual = `${temizHedef} ${evvelkiAcarlar.slice(0, 4).join(" ")}`.trim();
+        sorguObyektleri[0].ceki = 0.5;
+        sorguObyektleri.unshift({ metn: effektifSual, nov: "yonlendirme", ceki: 1.25 });
         dialoqKontekstiElaveEdildi = true;
+      } else {
+        const kontekstPrefiks = Array.from(new Set([...evvelkiMaddeler, ...evvelkiAcarlar])).join(" ").trim();
+        if (kontekstPrefiks) {
+          effektifSual = `${kontekstPrefiks} ${sual}`;
+          sorguObyektleri[0].ceki = 0.65;
+          sorguObyektleri.unshift({ metn: effektifSual, nov: "dialoq", ceki: 1.05 });
+          dialoqKontekstiElaveEdildi = true;
+        }
       }
     }
   }
@@ -669,13 +684,18 @@ Mövzu ilə bağlı sualınızı və ya situasiyanı yazın, dərhal araşdıraq
     };
   }
 
-  // 1) Birbaşa yaddaş əmri və ya İstifadəçi Ekspert Düzəlişi (Active Learning Loop) varmı?
-  const tarixce = db.sohbetleriAl(qovluq_id, 6, secilmisSaheId);
+  // 1) Birbaşa yaddaş əmri, Canlı Yönləndirmə və ya İstifadəçi Ekspert Düzəlişi (Active Learning Loop)
+  const tarixce = db.sohbetleriAl(qovluq_id, 10, secilmisSaheId);
   const sonIstifadeciSuali = [...tarixce].reverse().find(m => m.rol === "user")?.metn || "";
   const sonAsistantCavabi = [...tarixce].reverse().find(m => m.rol === "assistant")?.metn || "";
 
   const yaddasEmri = sual.match(/^(?:yadda saxla ki|unutma ki|qeyd et ki|yadda saxla\s*[:-])\s*(.+)/i);
   const duzelisEmri = !yaddasEmri && sual.length > 25 && /(?:düzgün təhlil etmədin|bəyənmədim|səhvdir|yanlışdır|əslində belədir|şərti belədi|qaydası belədir|qəbul edilir|belə hesablanmır|orada səhv|düzgün deyil|elə deyil)/i.test(sual);
+  const yonlendirmeEmri = !yaddasEmri && (
+    /(?:burdan|oradan|bundan|bu\s*(?:qanun|mənbə|maddə)(?:dan)?)\s*yox/i.test(sual) ||
+    /(?:yox|xeyr)[,\s]+(?:filan|başqa|[a-zçəıöğşü0-9.–-]+)\s*(?:qanun|məcəllə|maddə)/i.test(sual) ||
+    /(?:filan|başqa|[a-zçəıöğşü0-9.–-]+)\s*(?:qanun(?:dan|a)?|məcəllə(?:dən|yə)?|maddə(?:dən|yə)?)\s*(?:öyrən|bax|araşdır|əsaslan|keç|əsas\s*götür)/i.test(sual)
+  );
 
   if (yaddasEmri && yaddasEmri[1]) {
     const temizQayda = yaddasEmri[1].trim();
@@ -696,6 +716,19 @@ Mövzu ilə bağlı sualınızı və ya situasiyanı yazın, dərhal araşdıraq
       });
     }
     dusunmeAddimlari.push(`📌 İstifadəçi təlimatı həm Uzunmüddətli Yaddaşa, həm də Təcrübə Bankına yazıldı.`);
+  } else if (yonlendirmeEmri) {
+    const movzuKonteksti = sonIstifadeciSuali
+      ? `[Əvvəlki Mövzu: ${sonIstifadeciSuali.slice(0, 110).replace(/\n/g, " ")}] → `
+      : "";
+    const tamQizilQayda = `QIZIL QAYDA (Canlı Yönləndirmə): ${movzuKonteksti}${sual.slice(0, 350).trim()}`;
+    db.yaddasElaveEt({
+      kateqoriya: "qayda",
+      metn: tamQizilQayda,
+      menbe: "Canlı Dialoq Təlimatı",
+      sahe_id: secilmisSaheId,
+      vaciblik: 5
+    });
+    dusunmeAddimlari.push(`🧭 Canlı Dialoq Yönləndirməsi: İstifadəçi araşdırma istiqamətini dəyişdi (*"${sual.slice(0, 70)}"*), əvvəlki mövzu tələb olunan yeni mənbə üzrə araşdırılır.`);
   } else if (duzelisEmri) {
     const movzuKonteksti = sonIstifadeciSuali
       ? `[Mövzu: ${sonIstifadeciSuali.slice(0, 130).replace(/\n/g, " ")}] → `
@@ -973,6 +1006,16 @@ ${konsiliumPromptu}
    - Hər mənbənin **Redaksiya** tarixinə diqqət yetir: köhnə redaksiyanı (məs: 2023 və ya 2025) cari dövrün norması kimi təqdim etmə; əgər sənədin redaksiyası köhnədirsə, bunu istifadəçiyə açıq bildir.
    - Fakt TAPILMIŞ SİTAT BLOKLARI içində varsa, mütləq həmin blokun nömrəsini [1], [2] kimi göstər.
    - Fakt sitat bloklarında yoxdursa və öz ümumi hüquqi/ekspert biliyinlə tamamlayırsansa, uydurma sitat nömrəsi qoyma və bunu açıq qeyd et.
+
+6. **CANLI İNTERAKTİV DİALOQ, DƏYİŞƏN SSENARİLƏR VƏ İSTİFADƏÇİ YÖNLƏNDİRMƏSİ (ÇOX VACİB):**
+   - Sən istifadəçi ilə statik deyil, **canlı, qarşılıqlı düşüncə tərəfdaşlığı (collaborative dialogue)** aparırsan!
+   - **Mənbə və Qanun Dəyişdirilməsi ("Burdan yox, filan qanundan/maddədən öyrən"):**
+     * Əgər istifadəçi "burdan yox, filan qanundan/maddədən öyrən/bax", "Vergi Məcəlləsi ilə yox, Mülki Məcəllə ilə əsaslandır", "bu qaydanı kənarlaşdır, filan bəndi tətbiq et" deyirsə:
+     * Dərhal istifadəçinin yönləndirməsinə tabe ol! Köhnə mənbəni kənara qoy və birbaşa istifadəçinin tələb etdiyi qanun, məcəllə və ya maddə üzrə araşdırma apar.
+     * Cavabında bu dəyişikliyi xüsusi qeyd et: *"📌 İstifadəçi təlimatına əsasən [X mənbəsi] deyil, [Y qanunu/maddəsi] əsas götürülərək araşdırıldı..."*
+   - **Ssenari Dəyişikliyi ("Bəs belə olsa necə?", "Bəs hüquqi şəxs olsa?", "Bəs nağdsız ödənilsə?"):**
+     * Əgər istifadəçi əvvəlki sualı dəyişdirib, şərtləri fərqləndiribsə, əvvəlki dialoq kontekstini unutma!
+     * Əvvəlki hal ilə yeni hal arasındakı **FƏRQİ VƏ YENİ HÜQUQİ NƏTİCƏNİ** dəqiq tutuşdurub cavab ver.
 6. **Avtomatik Şəxsi Yaddaş:** YALNIZ istifadəçinin özünə, şirkətinə, müştərisinə və ya xüsusi iş qaydasına aid fərdi fakt olduqda (adi ümumi qanun maddələrini bura təkrar yazma!) ən sonda əlavə et:
 <YADDAŞ kateqoriya="fakt|qayda|tapşırıq|şəxs">Qısa fərdi fakt</YADDAŞ>${qanunPraktikaTelimati}
 
