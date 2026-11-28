@@ -920,7 +920,8 @@ const server = http.createServer(async (req, res) => {
         tarix_baslangic: b.tarix_baslangic || "",
         tarix_son: b.tarix_son || "",
         menbe_nov: b.menbe_nov || "",
-        derin_rejim: b.derin_rejim !== undefined ? b.derin_rejim : null
+        derin_rejim: b.derin_rejim !== undefined ? b.derin_rejim : null,
+        yenidenArasdir: Boolean(b.yenidenArasdir)
       });
       return jsonCavab(res, 200, {
         ok: true,
@@ -931,6 +932,15 @@ const server = http.createServer(async (req, res) => {
         dusunme_qaydalari: db.dusunmeQaydalariniAl(secilmisSaheId),
         mubahiseli_dosyeler: db.mubahiseliDosyeleriAl(secilmisSaheId, "gozleyir")
       });
+    }
+
+    // Hazır cavab bazası: söhbətdəki cavabı təsdiqləmək / təsdiqi silmək
+    if ((yol === "/api/cavab/tesdiq" || yol === "/api/cavab/tesdiq-sil") && req.method === "POST") {
+      const b = await govdeOxu(req);
+      if (!b.mesaj_id) return jsonCavab(res, 400, { ok: false, xeta: "Cavab seçilməyib." });
+      const yoxlayici = require("./src/yoxlayici");
+      const n = yol === "/api/cavab/tesdiq" ? yoxlayici.tesdiqle({ mesajId: b.mesaj_id }) : yoxlayici.tesdiqiSil({ mesajId: b.mesaj_id });
+      return jsonCavab(res, 200, { ok: true, saxlandi: n.ok, sebeb: n.sebeb || "" });
     }
 
     // 8b. Canlı NotebookLM Brauzer Körpüsü (Chrome Genişlənməsi üçün)
