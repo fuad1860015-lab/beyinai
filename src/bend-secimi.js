@@ -3,6 +3,7 @@
 //  söz uyğunluğu (nadir söz ağır) + axtarışın tapdığı maddələr + istinad edilən və ümumi bəndlər.
 "use strict";
 
+const crypto = require("node:crypto");
 const db = require("./db");
 const icmal = require("./icmal");
 const oyrenme = require("./oyrenme");
@@ -60,7 +61,10 @@ let keshIndeks = null;
 function indeks(saheId) {
   const menbeler = icmal.saheMenbeleri(saheId).filter(m => m.sinif === "resmi")
     .sort((a, b) => String(b.xam_metn || "").length - String(a.xam_metn || "").length);
-  const imza = menbeler.map(m => `${m.id}:${String(m.xam_metn || "").length}`).join("|");
+  // Uzunluq eyni qalan dəyişiklik də (2 faiz → 3 faiz) tutulsun
+  const h = crypto.createHash("sha1");
+  for (const m of menbeler) h.update(`${m.id}|${m.xam_metn}`);
+  const imza = h.digest("hex");
   if (imza === keshImza && keshIndeks) return keshIndeks;
   const maddeler = [];
   const bendler = [];
@@ -153,4 +157,17 @@ function bendleriSec({ sual = "", saheId, elaveNomreler = [], beyinNomreler = []
   return secilen;
 }
 
-module.exports = { bendleriSec, bendMetni, daxiliIstinadlar, nomreleriTap };
+// Maddələrin hazırkı mətninin imzası; maddələrdən biri tapılmırsa null
+function maddeImzasi(saheId, nomreler) {
+  const { maddeler } = indeks(saheId);
+  const h = crypto.createHash("sha1");
+  for (const n of nomreler) {
+    // Eyni maddənin bütün nüsxələri: köhnə sənəd aktiv qalıb yenisi yüklənsə də dəyişiklik görünsün
+    const nusxeler = maddeler.filter(x => x.madde === n);
+    if (nusxeler.length === 0) return null;
+    for (const m of nusxeler) h.update(`${n}|${m.metn.replace(/\s+/g, " ")}`);
+  }
+  return h.digest("hex").slice(0, 20);
+}
+
+module.exports = { bendleriSec, bendMetni, daxiliIstinadlar, nomreleriTap, maddeImzasi };

@@ -15,9 +15,13 @@ const secim = require("./bend-secimi");
 // 28.11.2026 sınağı: yüngül modellər qanun mətni qarşısında olsa da subyekti və şərtləri qarışdırır,
 // gemini-4-hydrogen isə düz cavab verdi (pulsuz açarla; tez-tez 503 verir).
 const ESAS_MODEL = "gemini-4-hydrogen";
-const MODELLER = [ESAS_MODEL, "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3-flash-preview", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"];
+const MODELLER = [ESAS_MODEL, "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3-flash-preview"];
 const BIR_SORGU_MS = 100 * 1000;  // əsas model bir cavabı 30-80 saniyəyə yazır
-const UMUMI_VAXT_MS = 200 * 1000; // brauzer 300 saniyə gözləyir
+const UMUMI_VAXT_MS = 200 * 1000; // dərin rejim; brauzer 300 saniyə gözləyir
+const SURETLI_VAXT_MS = 75 * 1000;
+// Düşünmə səviyyələri (ölçü: test/rejim-olcu.js)
+const SURETLI_SEVIYYE = "low";
+const DERIN_SEVIYYE = "high";
 const KESH_MUDDETI = 7 * 24 * 60 * 60 * 1000;
 const AKTIV_B64_ACAR = "QVEuQWI4Uk42SkVKM3J5QndWa01GZjN5MVZ6LVJvaVlMaS1rMG5BWkZhNVZISGdBd2VXNkE=";
 
@@ -44,13 +48,15 @@ db.db.exec(`
 // Tənzimləmə adı əvvəlki versiyadan qalıb: "0" olduqda birbaşa cavab söndürülür
 const aktivdirmi = (tenz = db.tenzimlemeleriAl()) => tenz.mena_yoxlamasi !== "0";
 
-const HUQUQI_SOZ = /vergi|məcəllə|maddə|ədv|gəlir|xərc|mənfəət|qaimə|çek|bəyannamə|cərimə|sanksiya|güzəşt|amortizasiya|dividend|icarə|sadələşdirilmiş|əmək\s*haqq|maaş|əmək\s*müqavil|məzuniyyət|ezamiyyə|rüsum|aksiz|əvəzləşdir|nağd/;
+const HUQUQI_SOZ = /hədd|vergi|məcəllə|maddə|ədv|gəlir|xərc|mənfəət|qaimə|çek|bəyannamə|cərimə|sanksiya|güzəşt|amortizasiya|dividend|icarə|sadələşdirilmiş|əmək\s*haqq|maaş|əmək\s*müqavil|məzuniyyət|ezamiyyə|rüsum|aksiz|əvəzləşdir|nağd/;
 const SUAL_ELAMETI = /\?|necə|nə\s+qədər|neçə|hansı|nədir|nə\s+vaxt|olar|olmaz|(?:^|\s)bəs(?:\s|$)|\p{L}+(?:mı|mi|mu|mü)(?:dır|dir|dur|dür)?(?=\s|$|[.,!])/u;
 
 // Birbaşa yola yalnız qanunvericilik sualı düşür; hesablama, sənəd təhlili və yaddaş söhbəti əvvəlki yolla gedir
-function uygundur(sual = "") {
+// davam: əvvəlki cavab qanunvericilik cavabıdırsa, onun davam sualı ("bəs xidmət üzrə?") də bu yolla gedir
+function uygundur(sual = "", { davam = false } = {}) {
   const s = db.azKicilt(String(sual)).trim();
-  if (s.split(/\s+/).length < 3 || !HUQUQI_SOZ.test(s) || !SUAL_ELAMETI.test(s)) return false;
+  const davamSualidir = davam && /(?:^|\s)(?:bəs|bu|bunu|bunun|buna|həmin|onda|ona|onun|o zaman|yuxarıdakı|əvvəlki)(?=\s|$|[,.?!])/.test(s);
+  if (!SUAL_ELAMETI.test(s) || (!davamSualidir && (s.split(/\s+/).length < 3 || !HUQUQI_SOZ.test(s)))) return false;
   if (/maaş|əmək\s*haqq|gross|(?:^|\s)net(?:\s|$)/.test(s) && /\d{3,}/.test(s.replace(/20\d\d/g, ""))) return false;
   return !/yadda\s*saxla|unut|yüklədiyim|bu\s+(?:sənəd|fayl|müqavilə)|(?:^|\s)(?:fayl|çat|yazışma)/.test(s);
 }
@@ -77,16 +83,19 @@ CAVABIN FORMASI (sadə, aydın, qısa; ən çox 150 söz)
 YALNIZ JSON:
 { "cavab": "yuxarıdakı formada, sətirlər \\n ilə", "bendler": ["cavabın dayandığı bənd nömrələri"], "daha_oxu": [] }`;
 
-async function modeldenCavab({ sorgu, key, bitmeVaxti }) {
+/**
+ * Yalnız güclü modellər: qanunu zəif model şərh etmir.
+ * seviyye — düşünmə dərinliyi; tekrarGozleme — əsas model "503 məşğuldur" deyəndə neçə ms sonra yenidən sınanır.
+ */
+async function modeldenCavab({ sorgu, key, bitmeVaxti, seviyye = "high", tekrarGozleme = [2000], izlem = {} }) {
   const aktivAcar = acarAl(key);
   for (const model of ai.sinanacaqModeller(MODELLER)) {
     const qalan = bitmeVaxti - Date.now();
     if (qalan < 5000) break;
-    if (model === ESAS_MODEL && qalan < 30000) continue; // az vaxtda yavaş modeli boşuna fasiləyə salmırıq
     const govde = {
       systemInstruction: { parts: [{ text: TELIMAT }] },
       contents: [{ role: "user", parts: [{ text: sorgu }] }],
-      generationConfig: { responseMimeType: "application/json", maxOutputTokens: 12288, thinkingConfig: { thinkingLevel: /lite/.test(model) ? "medium" : "high" } }
+      generationConfig: { responseMimeType: "application/json", maxOutputTokens: 12288, thinkingConfig: { thinkingLevel: seviyye } }
     };
     const gonder = () => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
       method: "POST",
@@ -96,16 +105,22 @@ async function modeldenCavab({ sorgu, key, bitmeVaxti }) {
     });
     try {
       let res = await gonder();
-      // Əsas modelin "503 məşğuldur" cavabı adətən keçicidir: bir dəfə də sınanır
-      if (res.status === 503 && model === ESAS_MODEL && bitmeVaxti - Date.now() > 45000) {
-        await new Promise(r => setTimeout(r, 2000));
+      for (const ms of model === ESAS_MODEL ? tekrarGozleme : []) {
+        if (res.status !== 503 || bitmeVaxti - Date.now() < ms + 20000) break;
+        await new Promise(r => setTimeout(r, ms));
         res = await gonder();
       }
       if (res.status === 400 && /thinking/i.test(await res.clone().text().catch(() => ""))) {
         delete govde.generationConfig.thinkingConfig;
         res = await gonder();
       }
-      if (!res.ok) { await ai.xetayaGoreFasile(model, res); continue; }
+      if (!res.ok) {
+        if (res.status === 429) izlem.limit = true;
+        else izlem.diger = true;
+        // Əsas model fasiləyə salınmır: onun 503-ü keçicidir və yerini tutan güclü model çox vaxt limitdədir
+        if (!(model === ESAS_MODEL && res.status >= 500)) await ai.xetayaGoreFasile(model, res);
+        continue;
+      }
       const data = await res.json();
       const xam = (data?.candidates?.[0]?.content?.parts || []).filter(p => !p.thought && p.text).map(p => p.text).join("");
       const m = xam.match(/\{[\s\S]*\}/);
@@ -113,12 +128,12 @@ async function modeldenCavab({ sorgu, key, bitmeVaxti }) {
       const json = JSON.parse(m[0]);
       if (String(json.cavab || "").trim().length >= 20) return { model, json };
     } catch (e) {
-      if (e.name === "TimeoutError") ai.modelFasilesiYaz(model, 3 * 60 * 1000);
+      izlem.diger = true;
+      if (e.name === "TimeoutError" && model !== ESAS_MODEL) ai.modelFasilesiYaz(model, 3 * 60 * 1000);
     }
   }
   return null;
 }
-
 const duz = (s, n) => String(s || "").replace(/\s+/g, " ").trim().slice(0, n);
 
 // Modelin cavabını göstəriləcək hala salır və proqram yoxlamasını aparır
@@ -153,17 +168,15 @@ function neticeniQur({ rey, subutlar, sual }) {
   }));
   const qanunMetni = sitatlar.map(s => `- _${s.basliq}:_ “${duz(s.metn, 1800)}”`).join("\n");
 
-  const zeif = /lite/.test(rey.model);
   const nisan = problemler.length
     ? `🟡 Qanun mətnində tapmadım: ${problemler.slice(0, 5).join(", ")} — yoxlayın`
-    : zeif ? "🟡 Güclü model əlçatan olmadı, zəif model yazıb — qanun mətni ilə tutuşdurun"
-      : "🟢 Maddə və rəqəmlər qanun mətnində var";
+    : "🟢 Maddə və rəqəmlər qanun mətnində var";
 
   return {
     cavab: qanunMetni ? `${metn}\n\n<DETALLI_ANALIZ>\n**Qanunun öz mətni:**\n${qanunMetni}\n</DETALLI_ANALIZ>` : metn,
     model: rey.model,
-    status: zeif || problemler.length ? "qismen" : "tam",
-    xeberdarliqVar: zeif || problemler.length > 0,
+    status: problemler.length ? "qismen" : "tam",
+    xeberdarliqVar: problemler.length > 0,
     nisan,
     problemler,
     sitatlar,
@@ -173,10 +186,35 @@ function neticeniQur({ rey, subutlar, sual }) {
   };
 }
 
+// Güclü model yazmayanda: şərh yoxdur, yalnız aid ola biləcək maddələrin öz mətni
+function metnCavabi(subutlar, limitBitib = false) {
+  const secilen = [...new Map(subutlar.map(s => [s.nomre_metni.split(".")[0], null])).keys()].slice(0, 4)
+    .map(madde => subutlar.find(s => s.nomre_metni.split(".")[0] === madde));
+  const sitatlar = secilen.map((s, i) => ({
+    nomre: i + 1, parca_id: null, menbe_id: s.menbe_id, menbe_adi: s.menbe_adi, basliq: s.etiket,
+    metn: s.metn.replace(/\[\d+\]/g, ""), menbe_sinfi: "resmi", huquqi_pille: 1, huquqi_etiket: "Rəsmi qanun mətni"
+  }));
+  const bendler = sitatlar.map(s => { const m = duz(s.metn, 600); return `- _${s.basliq}:_ “${m}${s.metn.length > 600 ? "…" : ""}”`; }).join("\n");
+  return {
+    cavab: `**${limitBitib ? "Güclü modellərin pulsuz limiti bitib" : "Güclü model indi əlçatan deyil"}, ona görə bu hələ cavab deyil.**\n\nSualınıza aid ola biləcək bəndlərin öz mətni:\n\n${bendler}\n\n${limitBitib ? "Limit yenilənəndən sonra (adətən növbəti gün) eyni sualı yenidən göndərin." : "Bir az sonra eyni sualı yenidən göndərin."}`,
+    model: "Qanun mətni (AI cavabı yoxdur)",
+    rejim: "metn",
+    status: "yoxlanmayib",
+    xeberdarliqVar: true,
+    nisan: "🟡 Cavab yazılmadı — yalnız qanun mətni",
+    problemler: [],
+    sitatlar,
+    tutusdurma: { maddeler: [], tapilmayanMaddeler: [], reqemSayi: 0, tapilmayanReqemler: [] },
+    subutSayi: subutlar.length,
+    bendler: subutlar.map(s => s.nomre_metni)
+  };
+}
+
 /**
- * Suala birbaşa cavab. null → uyğun qanun mətni tapılmadı və ya heç bir model cavab vermədi.
+ * Suala birbaşa cavab. derin: false → bir sorğu, az düşünmə; true → dərin düşünmə, lazım olsa əlavə maddə.
+ * null → uyğun qanun mətni tapılmadı. Güclü model əlçatmazdırsa, qanun mətni qaytarılır (rejim "metn").
  */
-async function cavabYaz({ sual, evvelkiSual = "", evvelkiCavab = "", saheId, key, hazirBilik = null, yaddas = [], bitmeVaxti = Date.now() + UMUMI_VAXT_MS }) {
+async function cavabYaz({ sual, evvelkiSual = "", evvelkiCavab = "", saheId, key, hazirBilik = null, yaddas = [], derin = true, bitmeVaxti }) {
   const toplayici = { sual: `${evvelkiSual}\n${sual}`.trim(), saheId, beyinNomreler: hazirBilik?.bendler || [] };
   let subutlar = secim.bendleriSec(toplayici);
   if (subutlar.length === 0) return null;
@@ -189,25 +227,36 @@ async function cavabYaz({ sual, evvelkiSual = "", evvelkiCavab = "", saheId, key
   ].filter(Boolean).join("\n\n");
 
   const bas = Date.now();
-  let rey = await modeldenCavab({ sorgu: sorguQur(), key, bitmeVaxti });
-  if (!rey) return null;
+  const hedd = bitmeVaxti || bas + (derin ? UMUMI_VAXT_MS : SURETLI_VAXT_MS);
+  const ayar = derin
+    ? { seviyye: DERIN_SEVIYYE, tekrarGozleme: [3000, 15000] }
+    : { seviyye: SURETLI_SEVIYYE, tekrarGozleme: [2000] };
+  const izlem = {};
+  let rey = await modeldenCavab({ sorgu: sorguQur(), key, bitmeVaxti: hedd, ...ayar, izlem });
+  if (!rey) return metnCavabi(subutlar, Boolean(izlem.limit && !izlem.diger));
 
-  // Model çatmayan maddə istəyibsə və vaxt varsa, mətn əlavə edilib bir dəfə də soruşulur
-  const istenen = (Array.isArray(rey.json.daha_oxu) ? rey.json.daha_oxu : [])
+  // Dərin rejimdə model çatmayan maddə istəyibsə və vaxt varsa, mətn əlavə edilib bir dəfə də soruşulur
+  const istenen = !derin ? [] : (Array.isArray(rey.json.daha_oxu) ? rey.json.daha_oxu : [])
     .map(x => String(x).match(/\d+(?:-\d+)?(?:\.\d+(?:-\d+)?)*/)?.[0]).filter(Boolean).slice(0, 4);
-  if (istenen.length && bitmeVaxti - Date.now() > Math.max(35000, (Date.now() - bas) * 1.15)) {
+  if (istenen.length && hedd - Date.now() > Math.max(35000, (Date.now() - bas) * 1.15)) {
     const genis = secim.bendleriSec({ ...toplayici, elaveNomreler: istenen });
     const varOlan = new Set(subutlar.map(s => s.nomre_metni));
     if (genis.some(s => istenen.includes(s.nomre_metni) && !varOlan.has(s.nomre_metni))) {
-      const evvelki = { rey, subutlar };
+      const evvelkiSubutlar = subutlar;
       subutlar = genis;
-      const ikinci = await modeldenCavab({ sorgu: sorguQur(), key, bitmeVaxti });
-      // Güclü modelin cavabı zəif modelin ikinci variantı ilə əvəz edilmir
-      if (ikinci && !(/lite/.test(ikinci.model) && !/lite/.test(rey.model))) rey = ikinci;
-      else subutlar = evvelki.subutlar;
+      const ikinci = await modeldenCavab({ sorgu: sorguQur(), key, bitmeVaxti: hedd, ...ayar });
+      if (ikinci) rey = ikinci;
+      else subutlar = evvelkiSubutlar;
     }
   }
-  return neticeniQur({ rey, subutlar, sual: toplayici.sual });
+  return { ...neticeniQur({ rey, subutlar, sual: toplayici.sual }), rejim: derin ? "derin" : "suretli" };
+}
+// Ölçü üçün (test/rejim-olcu.js): eyni bəndlərlə bir sorğu, verilmiş düşünmə səviyyəsi ilə
+async function sinaqCavabi({ sual, saheId, seviyye, key }) {
+  const subutlar = secim.bendleriSec({ sual, saheId });
+  const sorgu = `<QANUN>\n${subutlar.map(s => `### ${s.etiket} (${s.menbe_adi})\n${s.metn}`).join("\n\n")}\n</QANUN>\n\n<SUAL>\n${sual}`;
+  const rey = await modeldenCavab({ sorgu, key: key || db.tenzimlemeleriAl().gemini_api_key, bitmeVaxti: Date.now() + BIR_SORGU_MS, seviyye, tekrarGozleme: [3000, 10000] });
+  return rey ? neticeniQur({ rey, subutlar, sual }) : null;
 }
 
 // ---- Eyni suala eyni cavab ----
@@ -245,7 +294,81 @@ function keshSil(sual, saheId) {
   db.db.prepare("DELETE FROM yoxlanmis_cavablar WHERE acar = ?").run(keshAcari(sual, saheId));
 }
 
+// ---- Sizin təsdiqlədiyiniz cavablar: dərhal verilir, istinad edilən maddə dəyişəndə işlənmir ----
+db.db.exec(`
+  CREATE TABLE IF NOT EXISTS tesdiqli_cavablar (
+    acar TEXT PRIMARY KEY,
+    sahe_id TEXT NOT NULL,
+    sual TEXT NOT NULL,
+    cavab TEXT NOT NULL,
+    sitatlar TEXT NOT NULL,
+    maddeler TEXT NOT NULL,
+    imza TEXT NOT NULL,
+    yaradildi INTEGER NOT NULL
+  );
+`);
+
+// Əvvəlki söhbətə bağlı sual ("bəs bu halda?") saxlanmır: başqa söhbətdə başqa məna verər
+const musteqildir = (sual) => String(sual).trim().split(/\s+/).length >= 3 && String(sual).length <= 600 &&
+  !/(?:^|\s)(?:bəs|bu|bunu|bunun|buna|həmin|onda|ona|onun|o zaman|yuxarıdakı|əvvəlki|mənim|bizim)(?=\s|$|[,.?!])/.test(db.azKicilt(String(sual)).trim());
+
+// Söhbətdəki cavabı və onun sualını tapır. mesajId verilməsə: sahənin SON cavabı (təsdiq əmrlərinin cavabları sayılmır) —
+// köhnə bir cavab yanlışlıqla təsdiqlənməsin.
+function mesajiTap(mesajId, saheId) {
+  const sualiniAl = (c) => db.db.prepare("SELECT metn FROM sohbetler WHERE sahe_id IS ? AND rol = 'user' AND rowid < ? ORDER BY rowid DESC LIMIT 1").get(c.sahe_id, c.sira)?.metn;
+  const cavab = mesajId
+    ? db.db.prepare("SELECT rowid AS sira, * FROM sohbetler WHERE id = ? AND rol = 'assistant'").get(mesajId)
+    : db.db.prepare("SELECT rowid AS sira, * FROM sohbetler WHERE sahe_id = ? AND rol = 'assistant' ORDER BY rowid DESC LIMIT 10").all(saheId)
+      .find(c => !tesdiqEmri(sualiniAl(c) || ""));
+  if (!cavab) return null;
+  const sual = sualiniAl(cavab);
+  let sitatlar = [];
+  try { sitatlar = JSON.parse(cavab.sitatlar || "[]"); } catch (_) {}
+  return sual ? { cavab, sual, sitatlar } : null;
+}
+
+function tesdiqle({ mesajId = null, saheId = db.aktivSaheIdAl() } = {}) {
+  const m = mesajiTap(mesajId, saheId);
+  const rejim = m?.sitatlar[0]?.cavabRejimi;
+  if (!m || !["suretli", "derin", "tesdiqli"].includes(rejim)) return { ok: false, sebeb: "Yalnız qanun mətninə əsaslanan yazılmış cavab saxlanıla bilər." };
+  if (!musteqildir(m.sual)) return { ok: false, sebeb: "Sual əvvəlki söhbətə bağlıdır. Onu tam sual kimi yenidən yazın, sonra təsdiqləyin." };
+  const saheAdi = m.cavab.sahe_id || saheId;
+  const maddeler = [...new Set(m.sitatlar.map(s => String(s.basliq || "").match(/^Maddə\s+(\d+(?:-\d+)?)/)?.[1]).filter(Boolean))].sort();
+  const imza = maddeler.length ? secim.maddeImzasi(saheAdi, maddeler) : null;
+  if (!imza) return { ok: false, sebeb: "Cavabın dayandığı maddə mətni tapılmadı." };
+  const sitatlar = m.sitatlar.map(({ dusunmeAddimlari, cavabRejimi, ...s }) => s);
+  db.db.prepare("INSERT OR REPLACE INTO tesdiqli_cavablar (acar, sahe_id, sual, cavab, sitatlar, maddeler, imza, yaradildi) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(keshAcari(m.sual, saheAdi), saheAdi, m.sual, m.cavab.metn, JSON.stringify(sitatlar), JSON.stringify(maddeler), imza, Date.now());
+  db.auditQeydEt("cavab_tesdiqlendi", "sahe", saheAdi, m.sual.slice(0, 120));
+  return { ok: true, sual: m.sual };
+}
+
+// Eyni sual (hərfi, durğu işarələri nəzərə alınmadan) → təsdiqlənmiş cavab. { kohne: true } → qanun dəyişib.
+function tesdiqliOxu(sual, saheId) {
+  const r = db.db.prepare("SELECT * FROM tesdiqli_cavablar WHERE acar = ?").get(keshAcari(sual, saheId));
+  if (!r) return null;
+  if (secim.maddeImzasi(saheId, JSON.parse(r.maddeler)) !== r.imza) return { kohne: true, yaradildi: r.yaradildi };
+  return { cavab: r.cavab, sitatlar: JSON.parse(r.sitatlar), yaradildi: r.yaradildi };
+}
+
+function tesdiqiSil({ mesajId = null, saheId = db.aktivSaheIdAl() } = {}) {
+  const m = mesajiTap(mesajId, saheId);
+  if (!m) return { ok: false, sebeb: "Cavab tapılmadı." };
+  const saheAdi = m.cavab.sahe_id || saheId;
+  keshSil(m.sual, saheAdi);
+  const n = db.db.prepare("DELETE FROM tesdiqli_cavablar WHERE acar = ?").run(keshAcari(m.sual, saheAdi)).changes;
+  return n ? { ok: true, sual: m.sual } : { ok: false, sebeb: "Bu cavab təsdiqlənmiş deyil." };
+}
+
+// Çat və Telegram: "cavab düzdür", "təsdiqi sil"
+function tesdiqEmri(metn = "") {
+  const s = db.azKicilt(String(metn)).trim().replace(/[.!]+$/, "").replace(/^\//, "");
+  if (/^(?:bu\s+)?cavab\s+düzdür(?:[,\s]+yadda\s+saxla)?$|^cavabı\s+təsdiqlə$/.test(s)) return "tesdiq";
+  if (/^(?:cavabın\s+)?təsdiqi(?:ni)?\s+sil$/.test(s)) return "sil";
+  return null;
+}
 module.exports = {
-  aktivdirmi, acarAl, uygundur, cavabYaz, neticeniQur, keshlenebilir, keshOxu, keshYaz, keshSil,
+  aktivdirmi, acarAl, uygundur, cavabYaz, neticeniQur, sinaqCavabi, keshlenebilir, keshOxu, keshYaz, keshSil,
+  tesdiqle, tesdiqliOxu, tesdiqiSil, tesdiqEmri,
   bendMetni: secim.bendMetni, daxiliIstinadlar: secim.daxiliIstinadlar, nomreleriTap: secim.nomreleriTap
 };

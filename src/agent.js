@@ -816,7 +816,7 @@ function dusunenNeticeniHazirla({ dn, sual, qovluq_id, sahe_id, oyrenmeQeydi, il
       rol: "assistant",
       metn: cavabMetni,
       sitatlar: gosterilen.length > 0
-        ? gosterilen.map((s, idx) => (idx === 0 ? { ...s, dusunmeAddimlari } : s))
+        ? gosterilen.map((s, idx) => (idx === 0 ? { ...s, dusunmeAddimlari, ...(dn.yoxlama?.rejim ? { cavabRejimi: dn.yoxlama.rejim } : {}) } : s))
         : []
     });
   }
@@ -832,6 +832,7 @@ function dusunenNeticeniHazirla({ dn, sual, qovluq_id, sahe_id, oyrenmeQeydi, il
     aiCavabVerdi: true,
     tutusdurma: dn.tutusdurma,
     dusunenRejim: true,
+    cavabRejimi: dn.yoxlama?.rejim || null,
     sahe_id
   };
 }
@@ -904,6 +905,21 @@ async function agentSualCavabla({
       cavab = db.sohbetElaveEt({ rol: "assistant", metn, qovluq_id, sahe_id: secilmisSaheId });
     }
     return { cavab, sitatlar: [], dusunmeAddimlari: [], sahe_id: secilmisSaheId, beyinEmri: true };
+  }
+
+  // "cavab düzdür", "təsdiqi sil" — son cavab hazır cavab bazasına yazılır və ya silinir
+  const tesdiqEmri = yoxlayici.tesdiqEmri(sual);
+  if (tesdiqEmri) {
+    const n = tesdiqEmri === "tesdiq" ? yoxlayici.tesdiqle({ saheId: secilmisSaheId }) : yoxlayici.tesdiqiSil({ saheId: secilmisSaheId });
+    const metn = n.ok
+      ? (tesdiqEmri === "tesdiq" ? `✅ Yadda saxladım. Bu sualı yenidən verəndə həmin cavabı dərhal göstərəcəyəm: “${n.sual}”` : `🗑️ Təsdiqi sildim: “${n.sual}”`)
+      : `⚠️ ${n.sebeb}`;
+    let cavab = { id: "tesdiq-" + Date.now(), metn, model: "Hazır cavab bazası", sitatlar: [] };
+    if (sohbetdeSaxla) {
+      db.sohbetElaveEt({ rol: "user", metn: sual, qovluq_id, sahe_id: secilmisSaheId });
+      cavab = db.sohbetElaveEt({ rol: "assistant", metn, qovluq_id, sahe_id: secilmisSaheId });
+    }
+    return { cavab, sitatlar: [], dusunmeAddimlari: [], sahe_id: secilmisSaheId, tesdiqEmri: true };
   }
 
   // 1a) Ağıllı Niyyət Süzgəci: Salamlaşma, Özünü-Təqdimat və Ümumi Söhbət
@@ -1033,21 +1049,40 @@ Mövzu ilə bağlı sualınızı və ya situasiyanı yazın, dərhal araşdıraq
     dusunmeAddimlari.push(`🧭 Canlı Dialoq Yönləndirməsi: axtarış istiqaməti dəyişdirildi (*"${sual.slice(0, 70)}"*).`);
   }
 
+  const hazirla = (dn) => dusunenNeticeniHazirla({ dn, sual, qovluq_id, sahe_id: secilmisSaheId, oyrenmeQeydi, ilkAddimlar: dusunmeAddimlari.filter(a => /^📌|^📝|^🧬|^⌛/.test(a)), baslangicVaxt, sohbetdeSaxla });
+  const suzgecYoxdur = !gonderen && !tarix_baslangic && !tarix_son && !menbe_nov && !oyrenmeQeydi;
+
+  // Sizin təsdiqlədiyiniz cavab AI-siz, dərhal verilir ("yenidən araşdır" onu ötür)
+  if (!yenidenArasdir && suzgecYoxdur) {
+    const t = yoxlayici.tesdiqliOxu(sual, secilmisSaheId);
+    if (t && !t.kohne) {
+      const gun = new Date(t.yaradildi).toLocaleDateString("az-AZ");
+      return hazirla({
+        cavab: t.cavab, sitatlar: t.sitatlar, model: "Təsdiqlənmiş cavab", problemler: [], teklifler: [],
+        tutusdurma: { maddeler: [], tapilmayanMaddeler: [], reqemSayi: 0, tapilmayanReqemler: [] },
+        yoxlama: { status: "tam", xeberdarliqVar: false, rejim: "tesdiqli", nisan: `🟢 Sizin təsdiqlədiyiniz cavab (${gun})` },
+        addimlar: [`✅ Bu sualın ${gun} tarixində təsdiqlədiyiniz cavabını verdim (istinad edilən maddələr dəyişməyib)`]
+      });
+    }
+    if (t?.kohne) dusunmeAddimlari.push("⌛ Təsdiqlədiyiniz cavab köhnəlib (istinad edilən maddə dəyişib), yenidən araşdırıram.");
+  }
+
   // ---- DÜŞÜNƏN ASSİSTENT: model özü axtarır, oxuyur, düşünür. Alınmasa aşağıdakı köhnə yol işləyir. ----
   if (dusunenAktiv && !/^SINAQ SİMULYASİYASI:/i.test(sual)) {
-    const hazirla = (dn) => dusunenNeticeniHazirla({ dn, sual, qovluq_id, sahe_id: secilmisSaheId, oyrenmeQeydi, ilkAddimlar: dusunmeAddimlari.filter(a => /^📌|^📝|^🧬/.test(a)), baslangicVaxt, sohbetdeSaxla });
     // Eyni sual (proqramdan və ya Telegramdan) → eyni yoxlanmış cavab
     const keshOlar = yoxlayici.aktivdirmi(tenz) && !gonderen && !tarix_baslangic && !tarix_son && !menbe_nov && !oyrenmeQeydi;
     if (yenidenArasdir) yoxlayici.keshSil(sual, secilmisSaheId);
     else if (keshOlar) {
       const saxlanan = yoxlayici.keshOxu(sual, secilmisSaheId);
-      if (saxlanan) {
+      // Dərin rejimdə sürətli rejimin saxlanmış cavabı kifayət deyil
+      if (saxlanan && !(aktivDerinRejim && saxlanan.yoxlama?.rejim === "suretli")) {
         const gun = new Date(saxlanan.yaradildi).toLocaleDateString("az-AZ");
         return hazirla({ ...saxlanan, problemler: [], teklifler: [], addimlar: [`♻️ Bu sualın ${gun} tarixində yoxlanmış cavabını verdim (qanun mətni və yaddaş dəyişməyib)`] });
       }
     }
     const dn = await dusunen.cavabla({
-      sual: yenidenArasdir ? `${sual}\n\n(Əvvəlki cavab məni qane etmədi. Fərqli tərəfdən, daha diqqətlə yenidən araşdır.)` : sual,
+      // Qanunvericilik sualına əlavə qeyd yazılmır: bənd seçimini çaşdırır
+      sual: yenidenArasdir && !yoxlayici.uygundur(sual) ? `${sual}\n\n(Əvvəlki cavab məni qane etmədi. Fərqli tərəfdən, daha diqqətlə yenidən araşdır.)` : sual,
       qovluq_id,
       sahe_id: secilmisSaheId,
       tarixce,

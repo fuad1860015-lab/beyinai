@@ -489,14 +489,15 @@ YALNIZ bunları yoxla: təsdiqlənmirsə çıxar və ya əmin olmadığını yaz
 
 // Qanunvericilik sualı: proqram bəndləri seçir, model cavabı bir dəfəyə yazır (bax: yoxlayici.js).
 // null → bu yol uyğun deyil və ya alınmadı, adi düşünmə dövrəsi işləyir.
-async function birbasaCavab({ sual, saheId, tenz, key, tarixce, evvelkiCavab, hazirBilik, suzgec }) {
+async function birbasaCavab({ sual, saheId, tenz, key, tarixce, evvelkiCavab, hazirBilik, suzgec, derin }) {
   const yoxlayici = require("./yoxlayici");
-  if (!yoxlayici.aktivdirmi(tenz) || !yoxlayici.uygundur(sual) || Object.values(suzgec).some(Boolean)) return null;
+  const davam = Boolean([...tarixce].reverse().find(m => m.rol === "assistant")?.sitatlar?.[0]?.cavabRejimi);
+  if (!yoxlayici.aktivdirmi(tenz) || !yoxlayici.uygundur(sual, { davam }) || Object.values(suzgec).some(Boolean)) return null;
   try {
     // Özü-özlüyündə aydın sualda əvvəlki söhbət axtarışı çaşdırmasın
     const davamSualidir = !yoxlayici.keshlenebilir(sual);
     const y = await yoxlayici.cavabYaz({
-      sual, saheId, key, hazirBilik,
+      sual, saheId, key, hazirBilik, derin,
       evvelkiSual: davamSualidir ? [...tarixce].reverse().find(m => m.rol === "user")?.metn || "" : "",
       evvelkiCavab: davamSualidir ? evvelkiCavab : "",
       yaddas: db.yaddaslariAl(saheId).map(x => x.metn)
@@ -509,11 +510,11 @@ async function birbasaCavab({ sual, saheId, tenz, key, tarixce, evvelkiCavab, ha
       tutusdurma: y.tutusdurma,
       problemler: [], // yoxlamanın nəticəsi cavabın içinə yox, etibarlılıq nişanına yazılır
       teklifler: [],
-      yoxlama: { status: y.status, xeberdarliqVar: y.xeberdarliqVar, nisan: y.nisan },
+      yoxlama: { status: y.status, xeberdarliqVar: y.xeberdarliqVar, nisan: y.nisan, rejim: y.rejim },
       addimlar: [
         ...(hazirBilik ? [`🧠 Beynimdən götürdüm: *${hazirBilik.ad}*`] : []),
         `📖 Qanun mətnindən ${y.subutSayi} bənd seçdim: ${y.bendler.slice(0, 14).join(", ")}`,
-        `✍️ Cavabı bir dəfəyə yazdım (${y.model})`
+        y.rejim === "metn" ? "⏸️ Güclü modellər cavab vermədi, qanun mətnini göstərdim" : `✍️ ${y.rejim === "derin" ? "Dərin" : "Sürətli"} rejimdə cavab yazıldı (${y.model})`
       ]
     };
   } catch (e) {
@@ -551,7 +552,7 @@ async function cavabla({ sual, qovluq_id = "all", sahe_id = null, tarixce = [], 
   try { hazirBilik = require("./beyin").kontekstQur(sual, saheId, tenz); } catch (e) { console.error("Beyin xətası:", e.message); }
 
   if (tesdiqlenenler.length === 0) {
-    const birbasa = await birbasaCavab({ sual, saheId, tenz, key, tarixce, evvelkiCavab, hazirBilik, suzgec });
+    const birbasa = await birbasaCavab({ sual, saheId, tenz, key, tarixce, evvelkiCavab, hazirBilik, suzgec, derin: derin !== null ? Boolean(derin) : tenz.derin_rejim !== "0" });
     if (birbasa) return birbasa;
   }
 
