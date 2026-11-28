@@ -1300,7 +1300,9 @@ function sohbetleriCiz() {
         ? sitatlar.filter(s => istinadEdilenNomreler.has(s.nomre))
         : sitatlar.slice(0, 3);
 
-      const etiketMetni = istinadEdilenNomreler.size > 0
+      const etiketMetni = sitatlar[0]?.cavabRejimi
+        ? "Cavabın dayandığı maddələr:"
+        : istinadEdilenNomreler.size > 0
         ? "İstifadə olunan mənbələr:"
         : "💡 Ümumi qanunvericilik/ekspert biliyi + əlaqəli mənbələr:";
 
@@ -1326,7 +1328,10 @@ function sohbetleriCiz() {
       aletlerHtml = `
         <div class="mesaj-etiketli-aletler">
           <button type="button" class="mini-ikon-btn" data-kopyala="${idx}" title="Cavabın mətnini kopyala">📋 Kopyala</button>
-          <button type="button" class="mini-ikon-btn" data-oyren-tesdiq="${idx}" title="Cavab doğrudursa təcrübə yaddaşına əlavə et">👍 Düzgündür</button>
+          ${["suretli", "metn", "tesdiqli"].includes(sitatlar[0]?.cavabRejimi) ? `<button type="button" class="mini-ikon-btn" data-derin-arasdir="${idx}" title="Güclü modellə dərindən yenidən araşdır">🧠 Dərin araşdır</button>` : ""}
+          ${sitatlar[0]?.cavabRejimi === "metn" ? "" : sitatlar[0]?.cavabRejimi === "tesdiqli"
+            ? `<button type="button" class="mini-ikon-btn" data-tesdiq-sil="${idx}" title="Bu cavabı hazır cavab bazasından sil">🗑️ Təsdiqi sil</button>`
+            : `<button type="button" class="mini-ikon-btn" data-oyren-tesdiq="${idx}" title="Cavab doğrudursa saxla: eyni suala dərhal veriləcək">✅ Düzdür, yadda saxla</button>`}
           <button type="button" class="mini-ikon-btn" data-oyren-duzelis="${idx}" title="Səhv varsa düzgün qaydanı sistemə öyrət">✏️ Səhvi Düzəlt</button>
           <button type="button" class="mini-ikon-btn" data-seslendir="${idx}" title="Cavabı səslə oxut">🔊 Dinlə</button>
           <div class="menu-acilan-qabi">
@@ -1418,7 +1423,29 @@ function sohbetleriCiz() {
       }
       if (sual) {
         bildirisGoster("🔄 Sual yenidən cavablandırılır...");
-        sualGonder(sual);
+        sualGonder(sual, { yenidenArasdir: true });
+      }
+    });
+  });
+
+  qutu.querySelectorAll("[data-derin-arasdir]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const idx = Number(btn.getAttribute("data-derin-arasdir"));
+      const sual = veziyyet.sohbetler.slice(0, idx).reverse().find(x => x.rol === "user")?.metn;
+      if (sual) sualGonder(sual, { derin: true, yenidenArasdir: true });
+    });
+  });
+
+  qutu.querySelectorAll("[data-tesdiq-sil]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const m = veziyyet.sohbetler[Number(btn.getAttribute("data-tesdiq-sil"))];
+      if (!m) return;
+      btn.disabled = true;
+      try {
+        const t = await apiSorgu("/api/cavab/tesdiq-sil", "POST", { mesaj_id: m.id });
+        bildirisGoster(t.saxlandi ? "🗑️ Təsdiq silindi." : `⚠️ ${t.sebeb}`, 5000);
+      } catch (err) {
+        bildirisGoster("⚠️ " + err.message);
       }
     });
   });
@@ -1477,14 +1504,27 @@ function sohbetleriCiz() {
         }
       }
       btn.disabled = true;
-      btn.textContent = "✅ Təcrübə Bankına Əlavə Edildi";
+      btn.textContent = "✅ Saxlanılır...";
       try {
+        // Qanunvericilik cavabı hazır cavab bazasına yazılır
+        let bazaQeydi = "";
+        if (m.sitatlar?.[0]?.cavabRejimi) {
+          const t = await apiSorgu("/api/cavab/tesdiq", "POST", { mesaj_id: m.id });
+          if (!t.saxlandi) {
+            btn.disabled = false;
+            btn.textContent = "✅ Düzdür, yadda saxla";
+            bildirisGoster(`⚠️ ${t.sebeb}`, 6000);
+            return;
+          }
+          bazaQeydi = "✅ Saxlandı: bu sualı yenidən verəndə cavab dərhal çıxacaq.";
+        }
         await apiSorgu("/api/oyren", "POST", {
           nov: "tesdiq",
           sual,
           cavab: teqleriTemizle(m.metn)
         });
-        bildirisGoster("💼 Cavab etalon praktiki keys kimi 'Mühasibatlıq Praktikası və Təcrübə Bankı'na əlavə olundu!");
+        btn.textContent = "✅ Saxlanıldı";
+        bildirisGoster(bazaQeydi || "💼 Cavab etalon praktiki keys kimi 'Mühasibatlıq Praktikası və Təcrübə Bankı'na əlavə olundu!", 5000);
         melumatlariYenile();
       } catch (err) {
         bildirisGoster("⚠️ " + err.message);
@@ -1939,7 +1979,7 @@ async function fayllariYukle(fileList) {
 }
 
 // ---- Sual Göndərmə (Canlı Taymer və Ləğv Etmə ilə!) ----
-async function sualGonder(sualMetni) {
+async function sualGonder(sualMetni, { derin = null, yenidenArasdir = false } = {}) {
   const sual = String(sualMetni || "").trim();
   if (!sual) return;
 
@@ -1965,12 +2005,12 @@ async function sualGonder(sualMetni) {
   veziyyet.sohbetler.push(gozlemeMesaji);
   sohbetleriCiz();
 
-  const derinAktiv = veziyyet.tenzimlemeler.derin_rejim !== "0";
+  const derinAktiv = derin ?? veziyyet.tenzimlemeler.derin_rejim !== "0";
   const sanTimer = setInterval(() => {
     const san = ((Date.now() - baslangic) / 1000).toFixed(1);
     gozlemeMesaji.metn = derinAktiv
       ? `🧠 *Dərin təfəkkür rejimi: Mənbələr, şərtlər və qanunvericilik parçaları birləşdirilir (${san} san)...*`
-      : `⏳ *Mənbələr və şəxsi yaddaş analiz edilir (${san} san)...*`;
+      : `⚡ *Sürətli cavab hazırlanır (${san} san)...*`;
     sohbetleriCiz();
   }, 400);
 
@@ -1985,7 +2025,8 @@ async function sualGonder(sualMetni) {
         menbe_nov: document.getElementById("filtrNov").value,
         tarix_baslangic: document.getElementById("filtrTarixBaslangic").value,
         tarix_son: document.getElementById("filtrTarixSon").value,
-        derin_rejim: derinAktiv
+        derin_rejim: derinAktiv,
+        yenidenArasdir
       },
       { signal: veziyyet.sohbetAbort.signal, timeoutMs: 300000 } // düşünmə + güclü modellə yoxlama 4 dəqiqəyə yaxın çəkə bilər
     );
