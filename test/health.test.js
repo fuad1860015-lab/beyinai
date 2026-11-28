@@ -1269,7 +1269,7 @@ async function test(ad, fn) {
       assert.equal(tekrar.cavab.metn, m);
 
       // qanun mətni dəyişəndə saxlanmış cavab işlənmir; uydurma rəqəm nişanda görünür, cavab saxlanılmır
-      menbe = qur(govde.replace("2 faizdir", "3 faizdir"));
+      db.menbeSil(menbe.id); menbe = qur(govde.replace("2 faizdir", "3 faizdir"));
       require("../src/ai").modelFasileleriniSifirla();
       yazici = () => ({ cavab: "**Bəli,** təxminən 777 manatlıq hədd var (999.9).", bendler: ["920.8"] });
       const n2 = await sor();
@@ -1279,18 +1279,52 @@ async function test(ad, fn) {
       await sor();
       assert.ok(sorgular.length > sayi2, "Şübhəli cavab saxlanılmır");
 
-      // güclü model əlçatmazdırsa, bunu nişan deyir
+      // güclü model əlçatmazdırsa, zəif model qanunu şərh etmir: yalnız maddə mətni göstərilir
       require("../src/ai").modelFasileleriniSifirla();
-      yazici = (_, u) => (u.includes("lite") ? { cavab: "**Bəli, mallar üzrə limitlə** (920.8).", bendler: ["920.8"] } : null);
+      const modeller = [];
+      yazici = (_, u) => { modeller.push(u); return null; };
       const n3 = await sor();
-      assert.ok(n3.etibarliliq.includes("zəif model") && n3.cavab.metn.startsWith("**Bəli, mallar"), n3.etibarliliq);
+      assert.ok(modeller.length > 0 && !modeller.some(u => u.includes("lite")), "Zəif modelə sorğu getməməlidir");
+      assert.ok(n3.cavabRejimi === "metn" && n3.cavab.metn.includes("bu hələ cavab deyil") && n3.cavab.metn.includes(b928.replace("2 faizdir", "3 faizdir").slice(0, 60)), n3.cavab.metn);
+      assert.ok(n3.etibarliliq.includes("Cavab yazılmadı") && n3.cavab.metn.includes("pulsuz limiti bitib"));
 
-      // heç bir model yaza bilməsə, adi düşünmə yolu işləyir
+      // sürətli rejim: bir sorğu, az düşünmə, əlavə maddə üçün ikinci sorğu yoxdur
       require("../src/ai").modelFasileleriniSifirla();
-      yazici = () => null;
-      const n4 = await sor();
-      assert.ok(n4.cavab.metn.startsWith("Adi düşünmə yolunun cavabı."), n4.cavab.metn);
+      const seviyyeler = [];
+      yazici = () => ({ cavab: "**Sürətli:** hər bir hal üzrə 3 faiz (920.8).", bendler: ["920.8"], daha_oxu: ["940.7"] });
+      const evvelkiFetch = globalThis.fetch;
+      globalThis.fetch = async (u, o) => { seviyyeler.push(JSON.parse(o.body || "{}").generationConfig?.thinkingConfig?.thinkingLevel); return evvelkiFetch(u, o); };
+      const suretli = await agent.agentSualCavabla({ sual, sahe_id: sahe.id, derin_rejim: false });
+      globalThis.fetch = evvelkiFetch;
+      assert.deepEqual(seviyyeler, ["low"]);
+      assert.equal(suretli.cavabRejimi, "suretli");
+      assert.equal(db.sohbetleriAl("all", 5, sahe.id).at(-1).sitatlar[0].cavabRejimi, "suretli");
+      // dərin rejim sürətli cavabın saxlanmış variantı ilə kifayətlənmir
+      const s3 = sorgular.length;
+      yazici = () => ({ cavab: "**Dərin:** hər bir hal üzrə 3 faiz (920.8).", bendler: ["920.8"] });
+      assert.equal((await sor()).cavabRejimi, "derin");
+      assert.ok(sorgular.length > s3);
 
+      // təsdiqlənmiş cavab AI-siz verilir; maddə dəyişəndə işlənmir; silinə bilir
+      const t = yoxlayici.tesdiqle({ mesajId: suretli.cavab.id });
+      assert.ok(t.ok, t.sebeb);
+      db.db.prepare("DELETE FROM yoxlanmis_cavablar WHERE sahe_id = ?").run(sahe.id);
+      const s4 = sorgular.length;
+      const hazir = await sor();
+      assert.equal(sorgular.length, s4, "Təsdiqlənmiş cavab üçün AI sorğusu getməməlidir");
+      assert.ok(hazir.cavabRejimi === "tesdiqli" && hazir.cavab.metn.startsWith("**Sürətli:**") && hazir.etibarliliq.includes("təsdiqlədiyiniz"));
+      await agent.agentSualCavabla({ sual, sahe_id: sahe.id, yenidenArasdir: true, sohbetdeSaxla: false });
+      assert.ok(sorgular.length > s4, "Yenidən araşdır təsdiqlənmiş cavabı ötürməlidir");
+      db.menbeSil(menbe.id); menbe = qur(govde.replace("2 faizdir", "4 faizdir"));
+      assert.equal(yoxlayici.tesdiqliOxu(sual, sahe.id).kohne, true);
+      const emr = (s) => agent.agentSualCavabla({ sual: s, sahe_id: sahe.id });
+      yazici = () => ({ cavab: "**Yeni:** hər bir hal üzrə 4 faiz (920.8).", bendler: ["920.8"] });
+      await emr(sual);
+      assert.ok((await emr("cavab düzdür")).cavab.metn.startsWith("✅"));
+      assert.ok(yoxlayici.tesdiqliOxu(sual, sahe.id).cavab.startsWith("**Yeni:**"));
+      assert.ok((await emr("təsdiqi sil")).cavab.metn.startsWith("⚠️") === false && !yoxlayici.tesdiqliOxu(sual, sahe.id));
+      await emr("bəs bu halda xidmət üzrə hansı hədd tətbiq olunur");
+      assert.ok((await emr("cavab düzdür")).cavab.metn.includes("əvvəlki söhbətə bağlıdır"));
       assert.equal(yoxlayici.keshlenebilir("bəs bu halda xidmət üzrə hansı hədd tətbiq olunur"), false);
       const tg = require("../src/connectors").telegramCavabiFormatla;
       if (tg) assert.ok(!tg("Hədd var [109.8, 2] və [1].").qisa.includes("["));
@@ -1298,7 +1332,7 @@ async function test(ad, fn) {
       globalThis.fetch = kohneFetch;
       db.tenzimlemeYenile({ gemini_api_key: "", dusunen_rejim: "0", mena_yoxlamasi: "0" });
       db.menbeSil(menbe.id);
-      db.db.prepare("DELETE FROM yoxlanmis_cavablar WHERE sahe_id = ?").run(sahe.id);
+      for (const c of ["yoxlanmis_cavablar", "tesdiqli_cavablar", "sohbetler"]) db.db.prepare(`DELETE FROM ${c} WHERE sahe_id = ?`).run(sahe.id);
       require("../src/ai").modelFasileleriniSifirla();
     }
   });
