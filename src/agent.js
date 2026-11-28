@@ -14,6 +14,7 @@ const dusunen = require("./dusunen");
 const icmal = require("./icmal");
 const oyrenme = require("./oyrenme");
 const yoxlayici = require("./yoxlayici");
+const beyin = require("./beyin");
 
 // Canlı NotebookLM Brauzer Körpüsü növbəsi (Extension qoşulduqda sualları canlı olaraq notebooklm.google.com-a da yönləndirə bilir)
 const nlmSorguNovbesi = [];
@@ -784,8 +785,8 @@ function dusunenNeticeniHazirla({ dn, sual, qovluq_id, sahe_id, oyrenmeQeydi, il
       : !iddiaVar ? null
         : dn.tutusdurma.tapilmayanMaddeler.length > 0 ? "bosluq"
           : dn.problemler.length === 0 && resmiIstinad ? "yuksek" : "orta";
-  const etibarliliq = mena === "tam" ? "🟢 Qanun mətni ilə tutuşdurulub (AI yoxlaması) — mətn cavabdadır"
-    : mena === "qismen" ? "🟡 Yoxlanıb, amma tam cavab deyil — qeydlərə baxın"
+  const etibarliliq = mena === "tam" ? "🟢 Qanun mətni ilə tutuşdurulub (AI yoxlaması) — mətn cavabın altındadır"
+    : mena === "qismen" ? (dn.yoxlama.xeberdarliqVar ? "🟡 Yoxlanıb, amma qeydlərə baxın" : "🟡 Qanunla tutuşdurulub; cavabda assistentin öz mülahizəsi də var")
       : mena === "yoxlanmayib" ? "🟡 Mənaca yoxlanmayıb — özünüz yoxlayın"
         : etibarliliqKod === "yuksek" ? "🟢 İstinad və rəqəmlər rəsmi mətndə tapıldı"
           : etibarliliqKod === "bosluq" ? "🔴 Mənbədə təsdiq tapılmadı"
@@ -894,6 +895,18 @@ async function agentSualCavabla({
       cavab = db.sohbetElaveEt({ rol: "assistant", metn, qovluq_id, sahe_id: secilmisSaheId });
     }
     return { cavab, sitatlar: [], dusunmeAddimlari: [], sahe_id: secilmisSaheId, oyrenmeEmri: true };
+  }
+
+  // "beyin qur", "beyin göstər"
+  const beyinEmri = beyin.emriTani(sual);
+  if (beyinEmri) {
+    const metn = await beyin.emriIcraEt(beyinEmri, secilmisSaheId);
+    let cavab = { id: "beyin-" + Date.now(), metn, model: "Beyin", sitatlar: [] };
+    if (sohbetdeSaxla) {
+      db.sohbetElaveEt({ rol: "user", metn: sual, qovluq_id, sahe_id: secilmisSaheId });
+      cavab = db.sohbetElaveEt({ rol: "assistant", metn, qovluq_id, sahe_id: secilmisSaheId });
+    }
+    return { cavab, sitatlar: [], dusunmeAddimlari: [], sahe_id: secilmisSaheId, beyinEmri: true };
   }
 
   // 1a) Ağıllı Niyyət Süzgəci: Salamlaşma, Özünü-Təqdimat və Ümumi Söhbət

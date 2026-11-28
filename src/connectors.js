@@ -797,6 +797,27 @@ async function tgUpdateEmalEt(token, update) {
     return;
   }
 
+  // Beyin əmrləri ("beyin qur", "beyin göstər")
+  const beyin = require("./beyin");
+  const beyinEmri = beyin.emriTani(metn);
+  if (beyinEmri && !msg.forward_date) {
+    try {
+      if (beyinEmri.nov === "qur") await tgMesajGonder(token, chatId, "🧠 Beyni qurmağa başladım, bir neçə dəqiqə çəkə bilər...");
+      const netice = await beyin.emriIcraEt(beyinEmri);
+      const html = netice.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/^#+ /gm, "").replace(/^- /gm, "• ");
+      // Telegramın mesaj həddi: sətir sərhədindən bölünür
+      let parca = "";
+      for (const setir of html.split("\n")) {
+        if (parca && parca.length + setir.length > 3500) { await tgMesajGonder(token, chatId, parca); parca = ""; }
+        parca += `${setir}\n`;
+      }
+      if (parca.trim()) await tgMesajGonder(token, chatId, parca);
+    } catch (e) {
+      await tgMesajGonder(token, chatId, `⚠️ Beyin xətası: ${e.message}`);
+    }
+    return;
+  }
+
   // Həftəlik Mühasibat Təcrübə Bülleteni Komandası
   if (metn === "/bulleten" || metn === "/bülleten") {
     await tgMesajGonder(token, chatId, "📰 <b>Həftəlik Mühasibat və Vergi Təcrübəsi Bülleteni</b> toplanmış keyslər əsasında hazırlanır...");

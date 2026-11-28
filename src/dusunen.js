@@ -315,6 +315,8 @@ NECƏ DÜŞÜNÜRSƏN
 3. Cavab istifadəçinin vəziyyətindən asılıdırsa və bunu bilmirsənsə, konkret sual ver (bir-iki dənə). Asılı deyilsə, soruşma.
 4. İstifadəçi səhv fərziyyə edirsə, bunu nəzakətlə, əsasla de. Sadəcə razılaşma. Öz səhvini görsən, açıq etiraf et.
 5. Öz mülahizəni qanun mətnindən ayır: "mətndə belə yazılıb" və "mənim fikrimcə" fərqli şeylərdir.
+6. Hüquqi sualda həm ümumi qaydanı, həm xüsusi qaydanı tap və oxu. Konkret hal barədə ayrıca bənd yoxdursa, "tapmadım" deyib dayanma: ümumi qaydadan nə çıxdığını əsaslandır və bunun öz fikrin olduğunu bildir.
+7. Maddəni köçürmə: öz sözlərinlə nəticəni, səbəbini, riski və praktik olaraq nə edərdinsə onu de.
 
 NECƏ DANIŞIRSAN
 - Təbii, canlı, ədəbi Azərbaycan dilində; ağıllı həmkar kimi. Hazır şablon, məcburi başlıqlar və boş giriş cümlələri YOXDUR.
@@ -485,7 +487,7 @@ YALNIZ bunları yoxla: təsdiqlənmirsə çıxar və ya əmin olmadığını yaz
 }
 
 // Hüquqi cavabı göndərməzdən əvvəl qanun mətni ilə mənaca yoxlayır (bax: yoxlayici.js)
-async function menacaYoxla({ netice, sual, saheId, tenz, key, tarixce, aletler }) {
+async function menacaYoxla({ netice, sual, saheId, tenz, key, tarixce, aletler, hazirBilik = null }) {
   const yoxlayici = require("./yoxlayici");
   // Maaş hesablaması proqramın öz kalkulyatorundandır, onu yenidən yazmırıq
   if (!yoxlayici.aktivdirmi(tenz) || aletler.addimlar.some(a => a.startsWith("🧮"))) return netice;
@@ -493,7 +495,7 @@ async function menacaYoxla({ netice, sual, saheId, tenz, key, tarixce, aletler }
     const evvelkiSual = [...tarixce].reverse().find(m => m.rol === "user")?.metn || "";
     const y = await yoxlayici.yoxla({
       sual, evvelkiSual: yoxlayici.keshlenebilir(sual) ? "" : evvelkiSual,
-      qaralama: netice.cavab, sitatlar: netice.sitatlar, saheId, key
+      qaralama: netice.cavab, sitatlar: netice.sitatlar, saheId, key, hazirBilik
     });
     if (!y) return netice;
     if (y.alinmadi) {
@@ -542,16 +544,25 @@ async function cavabla({ sual, qovluq_id = "all", sahe_id = null, tarixce = [], 
     }
   }
 
+  // Beyin: bu mövzu əvvəlcədən hazırlanıbsa, aid bilik modelə hazır verilir
+  let hazirBilik = null;
+  try { hazirBilik = require("./beyin").kontekstQur(sual, saheId, tenz); } catch (e) { console.error("Beyin xətası:", e.message); }
+
   for (const model of ai.sinanacaqModeller(siyahi)) {
     if (Date.now() > bitmeVaxti - 5000) break;
     const aletler = aletleriQur({ sual, qovluq_id, sahe_id: saheId, tenz, suzgec, evvelkiCavab });
     for (const q of tesdiqlenenler) aletler.addimlar.push(`✅ Yadda saxladım: *${q.metn.slice(0, 120)}*`);
+    if (hazirBilik) {
+      aletler.oxunanMetnler.push(...hazirBilik.kartMetnleri);
+      aletler.addimlar.push(`🧠 Beynimdən götürdüm: *${hazirBilik.ad}* — bənd ${hazirBilik.bendler.join(", ")}`);
+    }
     try {
       const netice = await dovreIcraEt({
         model, key, sual, tarixce, aletler, bitmeVaxti,
         derin: derin !== null ? Boolean(derin) : tenz.derin_rejim !== "0",
         tesdiqlenmisYaddas: db.yaddaslariAl(saheId).map(y => y.metn),
         sistem: sistemTelimatiQur({ tenz, sahe_id: saheId }) +
+          (hazirBilik ? `\n\nBEYNİNDƏKİ HAZIR BİLİK (bu mövzunu əvvəlcədən oxuyub düşünmüsən)\nƏvvəlcə buna əsaslan. "Bəndlərin öz mətni" qanundur; qalan qeydlər sənin anlayışındır — mətnlə tutuşdur. Çatmayanı alətlərlə oxu.\n<BEYIN>\n${hazirBilik.metn}\n</BEYIN>` : "") +
           (tesdiqlenenler.length ? `\n\nBU MESAJLA TƏSDİQLƏNƏRƏK YADDAŞA YAZILDI (qısa təsdiq et): ${tesdiqlenenler.map(q => q.metn).join("; ")}` : "")
       });
       // İstifadəçi özü barədə fakt deyib, model isə təklif etməyibsə — onun öz sözləri ilə təklif yaradılır
@@ -567,7 +578,7 @@ async function cavabla({ sual, qovluq_id = "all", sahe_id = null, tarixce = [], 
         addimlar: aletler.addimlar,
         teklifler: [...aletler.teklifler.values()].slice(0, 3)
       };
-      return await menacaYoxla({ netice: tam, sual, saheId, tenz, key, tarixce, aletler });
+      return await menacaYoxla({ netice: tam, sual, saheId, tenz, key, tarixce, aletler, hazirBilik });
     } catch (e) {
       xetalar.push(e.message);
       if (e.name === "TimeoutError") ai.modelFasilesiYaz(model, 3 * 60 * 1000);

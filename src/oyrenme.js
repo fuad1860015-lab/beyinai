@@ -192,6 +192,7 @@ function itenSertler(esasMetn, fikir) {
   const sebebler = [];
   if (say(e, /istisna/g) > say(f, /istisna/g)) sebebler.push("istisna düşüb");
   if (/metod/.test(e) && !/metod/.test(f)) sebebler.push("hansı metoda aid olduğu düşüb");
+  if (/hər\s+bir\s+hal/.test(e) && !/hər\s+(?:bir\s+)?hal|ayrı/.test(f)) sebebler.push("\"hər bir hal üzrə\" (ayrılıqda tətbiq) şərti düşüb");
   if ((e.match(/20\d\d(?=-c)/g) || []).some(il => !f.includes(il))) sebebler.push("tarix şərti düşüb");
   return sebebler;
 }
