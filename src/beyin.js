@@ -430,19 +430,30 @@ function kontekstQur(sual, saheId, tenz = db.tenzimlemeleriAl()) {
   const sualNomreleri = yoxlayici.nomreleriTap(sual);
   for (const d of dosyeler(saheId)) {
     if (d.kohne) continue;
+    const ozSuallari = [...d.dosye.suallar, ...d.dosye.aciq_suallar];
     const kartKokleri = d.kartlar.map(k => kokler(`${k.ad} ${k.metn}`));
-    const movzuKokleri = kokler(`${d.ad} ${[...d.dosye.suallar, ...d.dosye.aciq_suallar].map(x => x.sual).join(" ")}`);
-    // Nadir söz daha çox şey deyir: neçə kartda keçirsə, çəkisi o qədər azdır
+    // Özünə verdiyi suallar gündəlik sözləri bəndə bağlayır (qanunda "əyləncə", sualda "şənlik")
+    const sualKartKokleri = ozSuallari.map(x => ({ bendler: x.bendler, kok: kokler(x.sual) }));
+    const movzuKokleri = kokler(`${d.ad} ${ozSuallari.map(x => x.sual).join(" ")}`);
+    // Nadir söz daha çox şey deyir; kartların çoxunda keçən söz ("gəlir", "xərc") seçimə təsir etmir
     const ceki = new Map(sualKokleri.map(s => {
       const say = kartKokleri.filter(k => k.has(s)).length;
-      return [s, say ? Math.log(1 + d.kartlar.length / say) : 0];
+      return [s, say && say <= d.kartlar.length / 3 ? Math.log(d.kartlar.length / say) : 0];
+    }));
+    const sualCekisi = new Map(sualKokleri.map(s => {
+      const say = sualKartKokleri.filter(x => x.kok.has(s)).length;
+      return [s, say && say <= Math.max(1, sualKartKokleri.length / 4) ? 3 : 0];
     }));
     const ortaq = sualKokleri.filter(s => movzuKokleri.has(s));
-    const xal = d.kartlar.map((k, i) => ({
-      k, xal: sualKokleri.reduce((t, s) => t + (kartKokleri[i].has(s) ? ceki.get(s) : 0), 0) + (sualNomreleri.some(n => n === k.bend) ? 100 : 0)
-    })).sort((a, b) => b.xal - a.xal);
+    const xal = d.kartlar.map((k, i) => {
+      const metnXali = sualKokleri.reduce((t, s) => t + (kartKokleri[i].has(s) ? ceki.get(s) : 0), 0);
+      const sualXali = Math.max(0, ...sualKartKokleri.filter(x => x.bendler.includes(k.bend))
+        .map(x => sualKokleri.reduce((t, s) => t + (x.kok.has(s) ? sualCekisi.get(s) : 0), 0)));
+      return { k, xal: metnXali + sualXali + (sualNomreleri.some(n => n === k.bend) ? 100 : 0) };
+    }).sort((a, b) => b.xal - a.xal);
     const nomreIle = xal[0]?.xal >= 100;
-    if (!nomreIle && (ortaq.length < 2 || !(xal[0]?.xal > 0))) continue;
+    const sozIle = xal[0]?.xal > 0 && sualKokleri.filter(s => ceki.get(s) > 0 || sualCekisi.get(s) > 0).length >= 2;
+    if (!nomreIle && !(ortaq.length >= 2 && xal[0]?.xal > 0) && !sozIle) continue;
 
     const secilen = new Map(xal.filter(x => x.xal > 0).slice(0, 5).map(x => [x.k.bend, x.k]));
     const kart = (n) => d.kartlar.find(k => k.bend === n);

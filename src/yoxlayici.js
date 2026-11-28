@@ -14,7 +14,12 @@ const ai = require("./ai");
 const icmal = require("./icmal");
 const oyrenme = require("./oyrenme");
 
-const MODELLER = ["gemini-3.6-flash", "gemini-3-flash-preview", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"];
+// Redaktor bir sualda 1-2 sorğu edir, ona görə ən güclü modellər burada işlədilir.
+// 28.11.2026 sınağı: yüngül modellər qanun mətni qarşısında olsa da subyekti və şərtləri qarışdırır,
+// gemini-4-hydrogen isə eyni səhv qaralamanı düzəltdi (pulsuz açarla; bəzən 503 verir).
+const ESAS_MODEL = "gemini-4-hydrogen";
+const MODELLER = [ESAS_MODEL, "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3-flash-preview", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"];
+const BIR_SORGU_MS = 100 * 1000;  // əsas model bir cavabı 30-80 saniyəyə yazır
 const BIR_SUBUT = 6000;          // bir bəndin / maddənin ən böyük uzunluğu
 const CEMI_SUBUT = 20000;
 const KESH_MUDDETI = 7 * 24 * 60 * 60 * 1000;
@@ -158,6 +163,7 @@ const TELIMAT = `Sən təcrübəli vergi və hüquq məsləhətçisisən. <QARAL
 1. İstifadəçi əslində nəyi həll etmək istəyir? Sualı hissələrinə ayır ("mal və xidmət" iki ayrı hissədir). İstifadəçinin sözünü qanunun sözü sayma.
 2. Ümumi qaydanı və xüsusi qaydanı ayrıca tap. Konkret hal barədə ayrıca bənd yoxdursa, "mətndə yoxdur" deyib dayanma: ümumi qaydadan bu hal üçün nə çıxdığını əsaslandır.
 3. Hər bəndi sözbəsöz oxu: kimə və nəyə aiddir, şərt, hədd, müddət, istisna, alternativ hal ("və ya"). "Hər bir ... üzrə", "istisna olmaqla", "yalnız" kimi sözləri itirmə. Bir şeyin qaydadan istisna edilməsi "ona məhdudiyyət yoxdur" demək deyil.
+   Sual sənəd barədədirsə (qaimə, çek, akt və s.), həmin sənədin kim üçün və nə vaxt MƏCBURİ olduğu qaydasını da yoxla.
 4. Əsaslandırma üçün lazım olan maddə <QANUN>-da yoxdursa, nömrəsini "daha_oxu"-ya yaz — proqram onu oxuyub sənə yenidən göndərəcək.
 
 CAVABI NECƏ YAZIRSAN
@@ -184,6 +190,7 @@ async function yoxlayiciSorgu({ sorgu, key, bitmeVaxti }) {
   for (const model of ai.sinanacaqModeller(MODELLER)) {
     const qalan = bitmeVaxti - Date.now();
     if (qalan < 5000) break;
+    if (model === ESAS_MODEL && qalan < 30000) continue; // az vaxtda yavaş modeli boşuna fasiləyə salmırıq
     const govde = {
       systemInstruction: { parts: [{ text: TELIMAT }] },
       contents: [{ role: "user", parts: [{ text: sorgu }] }],
@@ -193,10 +200,15 @@ async function yoxlayiciSorgu({ sorgu, key, bitmeVaxti }) {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-goog-api-key": aktivAcar },
       body: JSON.stringify(govde),
-      signal: AbortSignal.timeout(Math.min(60000, qalan))
+      signal: AbortSignal.timeout(Math.max(5000, Math.min(BIR_SORGU_MS, bitmeVaxti - Date.now())))
     });
     try {
       let res = await gonder();
+      // Əsas modelin "503 məşğuldur" cavabı adətən keçicidir: bir dəfə də sınanır
+      if (res.status === 503 && model === ESAS_MODEL && bitmeVaxti - Date.now() > 45000) {
+        await new Promise(r => setTimeout(r, 2000));
+        res = await gonder();
+      }
       if (res.status === 400 && /thinking/i.test(await res.clone().text().catch(() => ""))) {
         delete govde.generationConfig.thinkingConfig;
         res = await gonder();
@@ -258,6 +270,7 @@ function cavabiQur({ json, subutlar, sual }) {
     .replace(/\s*\[\d+(?:\s*,\s*\d+)*\]/g, "")
     .replace(/\[(\d+(?:\.\d+)+(?:-\d+)?)\]/g, "(bənd $1)")
     .replace(/<\/?DETALLI_ANALIZ>/gi, "")
+    .replace(/\s*\([^()]*daha_oxu[^()]*\)/gi, "") // daxili sahə adı cavaba sızmasın
     .trim().slice(0, 6000);
   if (metn.length < 20) return null;
 
@@ -311,7 +324,7 @@ function cavabiQur({ json, subutlar, sual }) {
  * Qaralama cavabı yoxlayır. null → yoxlanacaq hüquqi iddia yoxdur;
  * { alinmadi: true } → yoxlama mümkün olmadı (qaralama nişanla göndərilməlidir).
  */
-async function yoxla({ sual, evvelkiSual = "", qaralama, sitatlar = [], saheId, key, hazirBilik = null, bitmeVaxti = Date.now() + 90000 }) {
+async function yoxla({ sual, evvelkiSual = "", qaralama, sitatlar = [], saheId, key, hazirBilik = null, bitmeVaxti = Date.now() + 150000 }) {
   const toplayici = { sual: `${evvelkiSual}\n${sual}`, qaralama, sitatlar, saheId, beyinNomreler: hazirBilik?.bendler || [] };
   let subutlar = subutlariTopla(toplayici);
   if (subutlar.length === 0) return null;
@@ -329,13 +342,17 @@ async function yoxla({ sual, evvelkiSual = "", qaralama, sitatlar = [], saheId, 
   let geriBildirim = "";
   // İkinci tur yalnız əlavə maddə lazım olanda və ya proqram problem tapanda
   for (let tur = 1; tur <= 2; tur++) {
+    const turBasi = Date.now();
     const rey = await yoxlayiciSorgu({ sorgu: sorguQur(geriBildirim), key, bitmeVaxti });
     if (!rey) break;
     const qurulan = cavabiQur({ json: rey.json, subutlar, sual: `${evvelkiSual}\n${sual}` });
-    if (qurulan && (!netice || qurulan.problemler.length <= netice.problemler.length)) {
+    // Güclü modelin cavabı yüngül modelin ikinci variantı ilə əvəz edilmir
+    const zeiflesir = netice && /lite/.test(rey.model) && !/lite/.test(netice.model);
+    if (qurulan && !zeiflesir && (!netice || qurulan.problemler.length <= netice.problemler.length)) {
       netice = { ...qurulan, model: rey.model, subutSayi: subutlar.length };
     }
-    if (tur === 2) break;
+    // İkinci tura yalnız birincisi qədər vaxt qalıbsa başlanır (yarımçıq sorğu modeli boşuna fasiləyə salır)
+    if (tur === 2 || bitmeVaxti - Date.now() < Math.max(35000, (Date.now() - turBasi) * 1.15)) break;
 
     const istenen = (Array.isArray(rey.json.daha_oxu) ? rey.json.daha_oxu : [])
       .map(x => String(x).match(new RegExp(NOMRE))?.[0]).filter(Boolean).slice(0, 4);
@@ -351,7 +368,17 @@ async function yoxla({ sual, evvelkiSual = "", qaralama, sitatlar = [], saheId, 
       `Əvvəlki cavabın:\n${duz(rey.json.cavab, 4000)}`
     ].filter(Boolean).join("\n");
   }
-  return netice || { alinmadi: true };
+  if (!netice) return { alinmadi: true };
+  // Yüngül model yazıbsa, bu cavabın özündə görünməlidir (addımlar siyahısına baxmaq lazım gəlməsin)
+  if (/lite/.test(netice.model)) {
+    netice = {
+      ...netice,
+      cavab: `⚠️ Güclü model indi cavab vermədi, bu cavabı yüngül model yazıb. Hüquqi şərtlərdə səhv ola bilər: bir az sonra “yenidən araşdır” edin.\n\n${netice.cavab}`,
+      status: "qismen",
+      xeberdarliqVar: true
+    };
+  }
+  return netice;
 }
 
 // ---- Eyni suala eyni yoxlanmış cavab ----
@@ -366,7 +393,7 @@ function keshlenebilir(sual = "") {
 
 // Qanun mətni və ya sizin yaddaş qeydləriniz dəyişəndə saxlanmış cavab etibarsız olur
 function keshImzasi(saheId) {
-  const h = crypto.createHash("sha1").update("cavab-formati-2"); // format dəyişəndə köhnə saxlanmış cavablar işlənmir
+  const h = crypto.createHash("sha1").update("cavab-formati-3"); // format və ya redaktor dəyişəndə köhnə saxlanmış cavablar işlənmir
   for (const m of icmal.saheMenbeleri(saheId).filter(x => x.sinif === "resmi")) h.update(`${m.id}|${m.xam_metn}`);
   for (const y of db.yaddaslariAl(saheId)) h.update(`${y.id}|${y.metn}`);
   h.update(require("./beyin").imza(saheId));

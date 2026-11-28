@@ -475,8 +475,9 @@ YALNIZ bunları yoxla: təsdiqlənmirsə çıxar və ya əmin olmadığını yaz
       continue;
     }
 
-    // Yeni variant mövzudan çıxıbsa və ya daha pisdirsə, ilk cavab saxlanılır
-    if (ilkVariant && (!movzudaQalib(ilkVariant.cavab, cavab, sual) || problemler.length > ilkVariant.problemler.length)) {
+    // Yeni variant mövzudan çıxıbsa, daxili yoxlamadan danışırsa və ya daha pisdirsə, ilk cavab saxlanılır
+    const daxiliniDanisir = /əvvəlki\s+cavab/i.test(cavab) && !/əvvəlki\s+cavab/i.test(sual);
+    if (ilkVariant && (daxiliniDanisir || !movzudaQalib(ilkVariant.cavab, cavab, sual) || problemler.length > ilkVariant.problemler.length)) {
       aletler.addimlar.push("↩️ Yenidən yazılan variant mövzudan kənara çıxdı — ilk cavab saxlanıldı");
       return { ...ilkVariant, model };
     }
@@ -487,7 +488,7 @@ YALNIZ bunları yoxla: təsdiqlənmirsə çıxar və ya əmin olmadığını yaz
 }
 
 // Hüquqi cavabı göndərməzdən əvvəl qanun mətni ilə mənaca yoxlayır (bax: yoxlayici.js)
-async function menacaYoxla({ netice, sual, saheId, tenz, key, tarixce, aletler, hazirBilik = null }) {
+async function menacaYoxla({ netice, sual, saheId, tenz, key, tarixce, aletler, hazirBilik = null, bitmeVaxti }) {
   const yoxlayici = require("./yoxlayici");
   // Maaş hesablaması proqramın öz kalkulyatorundandır, onu yenidən yazmırıq
   if (!yoxlayici.aktivdirmi(tenz) || aletler.addimlar.some(a => a.startsWith("🧮"))) return netice;
@@ -495,7 +496,7 @@ async function menacaYoxla({ netice, sual, saheId, tenz, key, tarixce, aletler, 
     const evvelkiSual = [...tarixce].reverse().find(m => m.rol === "user")?.metn || "";
     const y = await yoxlayici.yoxla({
       sual, evvelkiSual: yoxlayici.keshlenebilir(sual) ? "" : evvelkiSual,
-      qaralama: netice.cavab, sitatlar: netice.sitatlar, saheId, key, hazirBilik
+      qaralama: netice.cavab, sitatlar: netice.sitatlar, saheId, key, hazirBilik, bitmeVaxti
     });
     if (!y) return netice;
     if (y.alinmadi) {
@@ -508,6 +509,8 @@ async function menacaYoxla({ netice, sual, saheId, tenz, key, tarixce, aletler, 
       ...netice,
       cavab: y.cavab,
       sitatlar: y.sitatlar,
+      model: y.model, // yekun cavabı yazan model (qaralamanı yazan yox)
+      qaralamaModeli: netice.model,
       problemler: [],
       tutusdurma: require("./agent").cavabiMenbeyleTutusdur({ cavab: y.cavab, kontekst: y.kontekst, sual }),
       yoxlama: { status: y.status, xeberdarliqVar: y.xeberdarliqVar }
@@ -578,7 +581,8 @@ async function cavabla({ sual, qovluq_id = "all", sahe_id = null, tarixce = [], 
         addimlar: aletler.addimlar,
         teklifler: [...aletler.teklifler.values()].slice(0, 3)
       };
-      return await menacaYoxla({ netice: tam, sual, saheId, tenz, key, tarixce, aletler, hazirBilik });
+      // Brauzer 300 saniyə gözləyir: düşünmə + yoxlama birlikdə ən çox 270 saniyə
+      return await menacaYoxla({ netice: tam, sual, saheId, tenz, key, tarixce, aletler, hazirBilik, bitmeVaxti: bitmeVaxti - UMUMI_VAXT_MS + 270 * 1000 });
     } catch (e) {
       xetalar.push(e.message);
       if (e.name === "TimeoutError") ai.modelFasilesiYaz(model, 3 * 60 * 1000);
