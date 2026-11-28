@@ -1215,14 +1215,15 @@ async function test(ad, fn) {
     }
   });
 
-  await test("48. Cavabın mənaca yoxlanması: istinad olunan bənd oxunur, sübutsuz iddia atılır, eyni suala eyni cavab", async () => {
+  await test("48. Cavabın mənaca yoxlanması: istinad olunan bənd və ümumi qayda oxunur, təhlil saxlanılır, eyni suala eyni cavab", async () => {
     const yoxlayici = require("../src/yoxlayici");
     require("../src/ai").modelFasileleriniSifirla();
     const sahe = db.saheYarat({ ad: "T48 sınaq sahəsi", kod: "t48_" + Date.now() });
     const b928 = "920.8. Uçotda olmayan fiziki şəxslərdən alış aktı əsasında və ya vergi ödəyicilərindən bu Məcəllənin 921.1-ci maddəsinə uyğun çek əsasında malların alınması üzrə xərclərin yuxarı həddi, daşınmaz əmlak istisna olmaqla, hər bir hal üzrə 2 faizdir.";
     const b921 = "921.1. Çekdə aşağıdakı məlumatlar olmalıdır:";
     const b9211 = "921.1.1. çeki verən vergi ödəyicisinin adı və VÖEN-i.";
-    const govde = `Maddə 920. Xərclər\n920.1. Ümumi qayda.\n${b928}\n920.9. Başqa qayda.\nMaddə 921. Çek\n${b921}\n${b9211}\n`;
+    const b9151 = "915.1. Gəlirlə bağlı xərclər qaydasında rəsmiləşdirildikdə gəlirdən çıxılır.";
+    const govde = `Maddə 915. Ümumi\n${b9151}\nMaddə 920. Xərclər\n920.1. Ümumi qayda.\n${b928}\n920.9. Başqa qayda.\nMaddə 921. Çek\n${b921}\n${b9211}\n`;
     const qur = (g) => db.menbeElaveEt({ qovluq_id: "qovluq-is", sahe_id: sahe.id, ad: "T48 Məcəlləsi", nov: "txt", xam_metn: "x ".repeat(32000) + "\n" + g,
       parcalar: [{ basliq: "Maddə 920. Xərclər", metn: b928 }, { basliq: "Maddə 921. Çek", metn: `${b921}\n${b9211}` }] });
     let menbe = qur(govde);
@@ -1232,28 +1233,33 @@ async function test(ad, fn) {
     assert.ok(bendi.includes("hər bir hal üzrə") && !bendi.includes("Başqa qayda"));
 
     const qaralama = "Bəli, mal və xidmətlər xərcə yazılır, çekdə sizin VÖEN olmalıdır (Maddə 920.8).";
-    const rey = {
-      qisa_cavab: "Mallar üzrə bəli; xidmətlər barədə bu mətndə heç nə deyilmir.",
-      bendler: [
-        { fikir: "Malların alınması xərcinin yuxarı həddi hər bir hal üzrə 2 faizdir, daşınmaz əmlak istisna olmaqla.", blok: 1, sitat: "malların alınması üzrə xərclərin yuxarı həddi, daşınmaz əmlak istisna olmaqla, hər bir hal üzrə 2 faizdir" },
-        { fikir: "Çekdə çeki verənin VÖEN-i olmalıdır.", blok: 2, sitat: "çeki verən vergi ödəyicisinin adı və VÖEN-i" },
-        { fikir: "Alıcının VÖEN-i mütləq yazılmalıdır.", blok: 1, sitat: "çekdə alıcının VÖEN-i mütləq göstərilməlidir" }
+    const rey1 = {
+      cavab: "Mallar üzrə bəli, amma hədd var (Maddə 920.8).",
+      dayaqlar: [{ blok: 1, sitat: "malların alınması üzrə xərclərin yuxarı həddi, daşınmaz əmlak istisna olmaqla" }],
+      daha_oxu: ["915.1"], mulahize_var: false, hisseler: [{ hisse: "xidmət", acar_soz: "xidmət", bend: "920.8" }]
+    };
+    const tehlil = "Mallar üzrə bəli: hər bir hal üzrə 2 faizlik hədd var, daşınmaz əmlak istisna olmaqla (Maddə 920.8).\n\nXidmət barədə ayrıca bənd görmürəm. Fikrimcə, ümumi qayda işləyir: xərc düzgün rəsmiləşdirilməlidir (Maddə 915.1). Mən olsam, xidmət üçün qaimə istərdim.";
+    const rey2 = {
+      cavab: `${tehlil} [1]`,
+      dayaqlar: [
+        { blok: 2, sitat: "malların alınması üzrə xərclərin yuxarı həddi, daşınmaz əmlak istisna olmaqla, hər bir hal üzrə 2 faizdir" },
+        { blok: 1, sitat: "Gəlirlə bağlı xərclər qaydasında rəsmiləşdirildikdə gəlirdən çıxılır" },
+        { blok: 1, sitat: "çekdə alıcının VÖEN-i mütləq göstərilməlidir" }
       ],
-      metnde_yoxdur: ["Xidmətlərin kassa çeki ilə xərcə yazılması"],
-      mulahize: "Təxminən 777 manatlıq limit olar.",
-      duzelisler: ["'xidmətlər' çıxarıldı"]
+      mulahize_var: true, duzelisler: ["xidmət hissəsi ümumi qayda ilə izah edildi"]
     };
     const sorgular = [];
-    let yoxlayiciCavabi = () => rey;
+    let yoxlayiciCavabi = (metn) => (metn.includes("<PROQRAM QEYDİ>") ? rey2 : rey1);
     const kohneFetch = globalThis.fetch;
     const gem = (metn) => new Response(JSON.stringify({ candidates: [{ content: { role: "model", parts: [{ text: metn }] } }] }), { status: 200 });
     globalThis.fetch = async (u, o) => {
       if (!String(u).includes("generateContent")) throw new Error("bağlı");
       const g = JSON.parse(o.body);
-      const yoxlamadir = Boolean(g.systemInstruction?.parts?.[0]?.text.includes("müstəqil ekspert"));
-      sorgular.push({ yoxlamadir, metn: g.contents.at(-1).parts[0].text || "" });
+      const yoxlamadir = Boolean(g.systemInstruction?.parts?.[0]?.text.includes("<QARALAMA> sənin köməkçinin"));
+      const metn = g.contents.at(-1).parts[0].text || "";
+      sorgular.push({ yoxlamadir, metn });
       if (!yoxlamadir) return gem(qaralama);
-      const c = yoxlayiciCavabi();
+      const c = yoxlayiciCavabi(metn);
       return c ? gem(JSON.stringify(c)) : new Response('{"error":"quota PerDay"}', { status: 429 });
     };
     db.tenzimlemeYenile({ gemini_api_key: "TEST-KEY-0123456789012345", dusunen_rejim: "1", mena_yoxlamasi: "1" });
@@ -1261,28 +1267,33 @@ async function test(ad, fn) {
     const sor = () => agent.agentSualCavabla({ sual, sahe_id: sahe.id, sohbetdeSaxla: false });
     try {
       const n = await sor();
-      const y = sorgular.find(s => s.yoxlamadir).metn;
-      assert.ok(y.includes(b928) && y.includes(b9211), "Bənd və istinad etdiyi bənd tam verilməlidir");
-      assert.ok(y.includes("<QARALAMA>") && y.includes(sual));
+      const [y1, y2] = sorgular.filter(s => s.yoxlamadir).map(s => s.metn);
+      assert.ok(y1.includes(b928) && y1.includes(b9211), "Bənd və istinad etdiyi bənd tam verilməlidir");
+      assert.ok(y1.includes("<QARALAMA>") && y1.includes(sual) && !y1.includes(b9151));
+      assert.ok(y1.includes("920.1. Ümumi qayda."), "Maddənin ümumi bəndi verilməlidir");
+      assert.ok(y2.includes('"xidmət" sözü yoxdur'), "Hissəyə aid olmayan bənd geri qaytarılmalıdır");
+      assert.ok(y2.includes(b9151), "İstənilən ümumi qayda oxunub ikinci turda verilməlidir");
       const m = n.cavab.metn;
-      assert.ok(m.startsWith("Mallar üzrə bəli") && m.includes("(Maddə 920.8)") && m.includes("(Maddə 921.1.1)"), m);
-      assert.ok(!m.includes("sizin VÖEN") && !m.includes("Alıcının VÖEN") && !m.includes("777"), "Sübutsuz iddia qalmamalıdır");
-      assert.ok(m.includes("tapmadığım") && m.includes("<DETALLI_ANALIZ>") && m.includes(b928));
+      assert.ok(m.startsWith(tehlil), `Təhlil olduğu kimi qalmalıdır: ${m}`);
+      assert.ok(!m.includes("[1]") && !m.includes("⚠️") && !m.includes("Alıcının VÖEN"), m);
+      assert.ok(m.indexOf("<DETALLI_ANALIZ>") > m.indexOf("Mən olsam") && m.includes(b928));
       assert.equal(n.etibarliliqKod, "orta");
-      assert.ok(n.sitatlar.some(s => s.basliq === "Maddə 920.8"));
+      assert.ok(n.sitatlar.some(s => s.basliq === "Maddə 920.8") && n.sitatlar.some(s => s.basliq === "Maddə 915.1"));
 
       const sayi = sorgular.length;
       const tekrar = await sor();
       assert.equal(sorgular.length, sayi, "Eyni sual üçün yeni sorğu getməməlidir");
       assert.equal(tekrar.cavab.metn, m);
 
-      // qanun mətni dəyişəndə saxlanmış cavab işlənmir; şərt düşübsə mətn gizlədilmir
+      // qanun mətni dəyişəndə saxlanmış cavab işlənmir; uydurma rəqəm və düşən şərt düzəlməsə açıq qeyd edilir
       menbe = qur(govde.replace("2 faizdir", "3 faizdir"));
       require("../src/ai").modelFasileleriniSifirla();
-      yoxlayiciCavabi = () => ({ qisa_cavab: "Bəli.", bendler: [{ fikir: "Malların alınması xərcinin həddi var.", blok: 1, sitat: "malların alınması üzrə xərclərin yuxarı həddi" }] });
+      yoxlayiciCavabi = () => ({ cavab: "Bəli, təxminən 777 manatlıq hədd var.", dayaqlar: [{ blok: 1, sitat: "malların alınması üzrə xərclərin yuxarı həddi" }] });
       const n2 = await sor();
-      assert.ok(sorgular.length > sayi);
-      assert.ok(n2.cavab.metn.includes("istisna düşüb") && !n2.cavab.metn.includes("<DETALLI_ANALIZ>"), n2.cavab.metn);
+      const turlar = sorgular.slice(sayi).filter(s => s.yoxlamadir);
+      assert.equal(turlar.length, 2, "Problem tapılanda bir dəfə geri qaytarılır");
+      assert.ok(turlar[1].metn.includes("777 manat") && turlar[1].metn.includes("istisna düşüb"));
+      assert.ok(n2.cavab.metn.includes("təsdiqləyə bilmədim") && n2.cavab.metn.includes("istisna düşüb") && n2.cavab.metn.includes("<DETALLI_ANALIZ>"), n2.cavab.metn);
       const sayi2 = sorgular.length;
       await sor();
       assert.ok(sorgular.length > sayi2, "Xəbərdarlıqlı cavab saxlanılmır");
@@ -1301,6 +1312,94 @@ async function test(ad, fn) {
       db.tenzimlemeYenile({ gemini_api_key: "", dusunen_rejim: "0", mena_yoxlamasi: "0" });
       db.menbeSil(menbe.id);
       db.db.prepare("DELETE FROM yoxlanmis_cavablar WHERE sahe_id = ?").run(sahe.id);
+      require("../src/ai").modelFasileleriniSifirla();
+    }
+  });
+
+  await test("49. Beyin: bəndlər və istinadlar proqramla tapılır, uydurma qeyd atılır, dosye cavaba verilir, mətn dəyişəndə işlənmir", async () => {
+    const beyin = require("../src/beyin");
+    require("../src/ai").modelFasileleriniSifirla();
+    const sahe = db.saheYarat({ ad: "T49 sınaq sahəsi", kod: "t49_" + Date.now() });
+    const b1 = "930.1. Gəlirlə bağlı xərclər sənədlə rəsmiləşdirildikdə gəlirdən çıxılır.";
+    const b8 = "931.8. Bu Məcəllənin 932.1-ci maddəsinə uyğun kassa çeki ilə alınan malların xərci hər bir hal üzrə 2 faizlə məhdudlaşır.";
+    const b9 = "932.1. Kassa çekində satıcının VÖEN-i olmalıdır.";
+    const govde = `Maddə 930. Xərclər\n${b1}\nMaddə 931. Məhdudiyyət\n${b8}\nMaddə 932. Çek\n${b9}\n`;
+    const qur = (g) => db.menbeElaveEt({ qovluq_id: "qovluq-is", sahe_id: sahe.id, ad: "T49 Məcəlləsi", nov: "txt", xam_metn: "x ".repeat(32000) + "\n" + g,
+      parcalar: [{ basliq: "Maddə 930. Xərclər", metn: b1 }, { basliq: "Maddə 931. Məhdudiyyət", metn: b8 }, { basliq: "Maddə 932. Çek", metn: b9 }] });
+    let menbe = qur(govde);
+
+    assert.deepEqual(beyin.istinadlar("bu Məcəllənin 14-cü, 14-1-ci və 67-ci maddələri").sort(), ["14", "14-1", "67"]);
+    assert.deepEqual(beyin.subyektler(b8), { mal: true, xidmet: false });
+    const t = beyin.bendleriTopla(sahe.id, ["930", "931"]);
+    assert.deepEqual(t.bendler.map(b => b.bend), ["930.1", "931.8", "932.1"]);
+    assert.deepEqual(t.elaqeler, [{ menbe: "931.8", hedef: "932.1" }]);
+
+    const kartlar = { kartlar: [
+      { bend: "930.1", ad: "Xərclərin ümumi qaydası", qayda: "Gəlirlə bağlı xərc sənədlə rəsmiləşdirildikdə gəlirdən çıxılır." },
+      { bend: "931.8", ad: "Kassa çeki limiti", qayda: "Kassa çeki ilə alınan mal və xidmət xərci 2 faizlə məhdudlaşır." },
+      { bend: "932.1", ad: "Çekin rekvizitləri", qayda: "Kassa çekində satıcının VÖEN-i olmalıdır." }
+    ] };
+    const dosye = {
+      umumi_qaydalar: [{ metn: "Xərc rəsmiləşdirilməlidir.", bendler: ["930.1"] }],
+      xususi_qaydalar: [
+        { metn: "Kassa çeki ilə alınan mallarda hər bir hal üzrə 2 faiz həddi var.", bendler: ["931.8"] },
+        { metn: "Uydurma 777 manatlıq hədd var.", bendler: ["931.8"] },
+        { metn: "Olmayan bənddən qayda.", bendler: ["999.1"] }
+      ],
+      elaqeler: [{ menbe: "931.8", hedef: "930.1", nov: "xüsusi hal", izah: "Mallar üçün əlavə hədd qoyur." }],
+      suallar: [{ sual: "Kassa çeki ilə alınan xidmət xərci necə olur?", cavab: "Ayrıca bənd yoxdur, ümumi qayda işləyir.", bendler: ["930.1"] }],
+      aciq_suallar: [{ sual: "Kassa çeki xidmət üçün kifayətdirmi?", mulahize: "Fikrimcə, qaimə daha etibarlıdır.", bendler: ["930.1"] }]
+    };
+    const sorgular = [];
+    const kohneFetch = globalThis.fetch;
+    const gem = (metn) => new Response(JSON.stringify({ candidates: [{ content: { role: "model", parts: [{ text: metn }] } }] }), { status: 200 });
+    globalThis.fetch = async (u, o) => {
+      if (!String(u).includes("generateContent")) throw new Error("bağlı");
+      const g = JSON.parse(o.body);
+      const sistem = g.systemInstruction.parts[0].text;
+      sorgular.push({ sistem, metn: g.contents.at(-1).parts[0].text || "" });
+      if (sistem.includes("bilik kartı")) return gem(JSON.stringify(kartlar));
+      if (sistem.includes("\"dosye\" hazırla")) return gem(JSON.stringify(dosye));
+      if (sistem.includes("<QARALAMA> sənin köməkçinin")) return gem(JSON.stringify({ cavab: "Mallar üzrə hər bir hal üzrə 2 faiz həddi var (Maddə 931.8).", dayaqlar: [{ blok: 1, sitat: "malların xərci hər bir hal üzrə 2 faizlə məhdudlaşır" }] }));
+      return gem("Hədd 2 faizdir (Maddə 931.8).");
+    };
+    db.tenzimlemeYenile({ gemini_api_key: "TEST-KEY-0123456789012345" });
+    try {
+      const n = await beyin.qur({ saheId: sahe.id, fasileMs: 0, movzu: "xercler" });
+      assert.equal(n.ok, false, "Mövzu maddələri sahədə yoxdursa beyin qurulmur");
+      beyin.MOVZULAR.t49 = { ad: "Kassa çeki xərcləri", maddeler: ["930", "931"] };
+      const n2 = await beyin.qur({ saheId: sahe.id, fasileMs: 0, movzu: "t49" });
+      assert.deepEqual([n2.ok, n2.kartSayi, n2.izahliKart, n2.atilan, n2.qaydaSayi], [true, 3, 2, 2, 2], JSON.stringify(n2));
+      const d = beyin.dosyeler(sahe.id)[0];
+      assert.ok(d.kartlar.find(k => k.bend === "931.8").sebeb.includes("xidmət"), "Mətndə olmayan subyekt əlavə edən izah rədd edilir");
+      assert.ok(!JSON.stringify(d.dosye).includes("777"));
+      assert.ok(beyin.dosyeMetni(d).includes("Açıq qalan suallar"));
+
+      const sual = "kassa çeki ilə alınan xidmət xərci gəlirdən çıxılırmı";
+      const k = beyin.kontekstQur(sual, sahe.id);
+      assert.ok(k && k.bendler.includes("930.1") && k.bendler.includes("931.8"), JSON.stringify(k?.bendler));
+      assert.ok(k.metn.includes("mətndə \"mal\" var, \"xidmət\" yoxdur") && k.metn.includes("qaimə daha etibarlıdır"));
+      assert.equal(beyin.kontekstQur("hava bu gün necədir", sahe.id), null);
+      assert.equal(beyin.kontekstQur(sual, sahe.id, { beyin_rejim: "0" }), null);
+
+      sorgular.length = 0;
+      db.tenzimlemeYenile({ dusunen_rejim: "1", mena_yoxlamasi: "1" });
+      const c = await agent.agentSualCavabla({ sual, sahe_id: sahe.id, sohbetdeSaxla: false });
+      assert.ok(sorgular[0].sistem.includes("<BEYIN>") && sorgular[0].sistem.includes("Kassa çeki xərcləri"));
+      assert.ok(sorgular.at(-1).metn.includes("<DOSYE") && sorgular.at(-1).metn.includes(b1), "Yoxlayıcıya dosye və ümumi bənd verilməlidir");
+      assert.ok(c.dusunmeAddimlari.some(a => a.startsWith("🧠 Beynimdən")));
+      const emr = await agent.agentSualCavabla({ sual: "beyin göstər", sahe_id: sahe.id, sohbetdeSaxla: false });
+      assert.ok(emr.cavab.metn.includes("Kassa çeki xərcləri"));
+
+      db.menbeSil(menbe.id);
+      menbe = qur(govde.replace("2 faizlə", "3 faizlə"));
+      assert.equal(beyin.kontekstQur(sual, sahe.id), null, "Mətn dəyişibsə köhnə dosye işlənmir");
+    } finally {
+      globalThis.fetch = kohneFetch;
+      delete beyin.MOVZULAR.t49;
+      db.tenzimlemeYenile({ gemini_api_key: "", dusunen_rejim: "0", mena_yoxlamasi: "0" });
+      db.menbeSil(menbe.id);
+      for (const c of ["beyin_kartlari", "beyin_elaqeleri", "beyin_dosyeleri", "yoxlanmis_cavablar"]) db.db.prepare(`DELETE FROM ${c} WHERE sahe_id = ?`).run(sahe.id);
       require("../src/ai").modelFasileleriniSifirla();
     }
   });
