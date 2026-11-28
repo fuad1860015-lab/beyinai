@@ -1987,7 +1987,7 @@ async function sualGonder(sualMetni) {
         tarix_son: document.getElementById("filtrTarixSon").value,
         derin_rejim: derinAktiv
       },
-      { signal: veziyyet.sohbetAbort.signal, timeoutMs: 180000 }
+      { signal: veziyyet.sohbetAbort.signal, timeoutMs: 300000 } // düşünmə + güclü modellə yoxlama 4 dəqiqəyə yaxın çəkə bilər
     );
 
     clearInterval(sanTimer);
