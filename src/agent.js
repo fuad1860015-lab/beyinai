@@ -785,10 +785,7 @@ function dusunenNeticeniHazirla({ dn, sual, qovluq_id, sahe_id, oyrenmeQeydi, il
       : !iddiaVar ? null
         : dn.tutusdurma.tapilmayanMaddeler.length > 0 ? "bosluq"
           : dn.problemler.length === 0 && resmiIstinad ? "yuksek" : "orta";
-  const etibarliliq = mena === "tam" ? "🟢 Qanun mətni ilə tutuşdurulub (AI yoxlaması) — mətn cavabın altındadır"
-    : mena === "qismen" ? (dn.yoxlama.xeberdarliqVar ? "🟡 Yoxlanıb, amma qeydlərə baxın" : "🟡 Qanunla tutuşdurulub; cavabda assistentin öz mülahizəsi də var")
-      : mena === "yoxlanmayib" ? "🟡 Mənaca yoxlanmayıb — özünüz yoxlayın"
-        : etibarliliqKod === "yuksek" ? "🟢 İstinad və rəqəmlər rəsmi mətndə tapıldı"
+  const etibarliliq = mena ? dn.yoxlama.nisan || "" : etibarliliqKod === "yuksek" ? "🟢 İstinad və rəqəmlər rəsmi mətndə tapıldı"
           : etibarliliqKod === "bosluq" ? "🔴 Mənbədə təsdiq tapılmadı"
             : etibarliliqKod === "orta" ? "🟡 Qismən yoxlanıb — özünüz də yoxlayın" : "";
 

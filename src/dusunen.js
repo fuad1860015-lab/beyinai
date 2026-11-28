@@ -487,41 +487,40 @@ YALNIZ bunları yoxla: təsdiqlənmirsə çıxar və ya əmin olmadığını yaz
   throw new Error("dövrə limiti");
 }
 
-// Hüquqi cavabı göndərməzdən əvvəl qanun mətni ilə mənaca yoxlayır (bax: yoxlayici.js)
-async function menacaYoxla({ netice, sual, saheId, tenz, key, tarixce, aletler, hazirBilik = null, bitmeVaxti }) {
+// Qanunvericilik sualı: proqram bəndləri seçir, model cavabı bir dəfəyə yazır (bax: yoxlayici.js).
+// null → bu yol uyğun deyil və ya alınmadı, adi düşünmə dövrəsi işləyir.
+async function birbasaCavab({ sual, saheId, tenz, key, tarixce, evvelkiCavab, hazirBilik, suzgec }) {
   const yoxlayici = require("./yoxlayici");
-  // Maaş hesablaması proqramın öz kalkulyatorundandır, onu yenidən yazmırıq
-  if (!yoxlayici.aktivdirmi(tenz) || aletler.addimlar.some(a => a.startsWith("🧮"))) return netice;
+  if (!yoxlayici.aktivdirmi(tenz) || !yoxlayici.uygundur(sual) || Object.values(suzgec).some(Boolean)) return null;
   try {
-    const evvelkiSual = [...tarixce].reverse().find(m => m.rol === "user")?.metn || "";
-    const y = await yoxlayici.yoxla({
-      sual, evvelkiSual: yoxlayici.keshlenebilir(sual) ? "" : evvelkiSual,
-      qaralama: netice.cavab, sitatlar: netice.sitatlar, saheId, key, hazirBilik, bitmeVaxti
+    // Özü-özlüyündə aydın sualda əvvəlki söhbət axtarışı çaşdırmasın
+    const davamSualidir = !yoxlayici.keshlenebilir(sual);
+    const y = await yoxlayici.cavabYaz({
+      sual, saheId, key, hazirBilik,
+      evvelkiSual: davamSualidir ? [...tarixce].reverse().find(m => m.rol === "user")?.metn || "" : "",
+      evvelkiCavab: davamSualidir ? evvelkiCavab : "",
+      yaddas: db.yaddaslariAl(saheId).map(x => x.metn)
     });
-    if (!y) return netice;
-    if (y.alinmadi) {
-      netice.addimlar.push("⚠️ Cavabı qanun mətni ilə ikinci dəfə yoxlaya bilmədim (AI əlçatan olmadı və ya cavab yararsız idi)");
-      return { ...netice, yoxlama: { status: "yoxlanmayib" } };
-    }
-    netice.addimlar.push(`🧐 Cavabı ${y.subutSayi} qanun mətni ilə tutuşdurdum (${y.model})${y.atilan ? `, ${y.atilan} sübutsuz iddia atıldı` : ""}`);
-    for (const d of y.duzelisler) netice.addimlar.push(`✏️ Düzəliş: ${d}`);
+    if (!y) return null;
     return {
-      ...netice,
       cavab: y.cavab,
       sitatlar: y.sitatlar,
-      model: y.model, // yekun cavabı yazan model (qaralamanı yazan yox)
-      qaralamaModeli: netice.model,
-      problemler: [],
-      tutusdurma: require("./agent").cavabiMenbeyleTutusdur({ cavab: y.cavab, kontekst: y.kontekst, sual }),
-      yoxlama: { status: y.status, xeberdarliqVar: y.xeberdarliqVar }
+      model: y.model,
+      tutusdurma: y.tutusdurma,
+      problemler: [], // yoxlamanın nəticəsi cavabın içinə yox, etibarlılıq nişanına yazılır
+      teklifler: [],
+      yoxlama: { status: y.status, xeberdarliqVar: y.xeberdarliqVar, nisan: y.nisan },
+      addimlar: [
+        ...(hazirBilik ? [`🧠 Beynimdən götürdüm: *${hazirBilik.ad}*`] : []),
+        `📖 Qanun mətnindən ${y.subutSayi} bənd seçdim: ${y.bendler.slice(0, 14).join(", ")}`,
+        `✍️ Cavabı bir dəfəyə yazdım (${y.model})`
+      ]
     };
   } catch (e) {
-    console.error("Mənaca yoxlama xətası:", e.message);
-    netice.addimlar.push("⚠️ Cavabı qanun mətni ilə ikinci dəfə yoxlaya bilmədim");
-    return { ...netice, yoxlama: { status: "yoxlanmayib" } };
+    console.error("Birbaşa cavab xətası:", e.message);
+    return null;
   }
 }
-
 /**
  * Sualı düşünən assistent kimi cavablandırır. AI əlçatan deyilsə null qaytarır (köhnə yol işləyir).
  */
@@ -550,6 +549,11 @@ async function cavabla({ sual, qovluq_id = "all", sahe_id = null, tarixce = [], 
   // Beyin: bu mövzu əvvəlcədən hazırlanıbsa, aid bilik modelə hazır verilir
   let hazirBilik = null;
   try { hazirBilik = require("./beyin").kontekstQur(sual, saheId, tenz); } catch (e) { console.error("Beyin xətası:", e.message); }
+
+  if (tesdiqlenenler.length === 0) {
+    const birbasa = await birbasaCavab({ sual, saheId, tenz, key, tarixce, evvelkiCavab, hazirBilik, suzgec });
+    if (birbasa) return birbasa;
+  }
 
   for (const model of ai.sinanacaqModeller(siyahi)) {
     if (Date.now() > bitmeVaxti - 5000) break;
@@ -581,8 +585,7 @@ async function cavabla({ sual, qovluq_id = "all", sahe_id = null, tarixce = [], 
         addimlar: aletler.addimlar,
         teklifler: [...aletler.teklifler.values()].slice(0, 3)
       };
-      // Brauzer 300 saniyə gözləyir: düşünmə + yoxlama birlikdə ən çox 270 saniyə
-      return await menacaYoxla({ netice: tam, sual, saheId, tenz, key, tarixce, aletler, hazirBilik, bitmeVaxti: bitmeVaxti - UMUMI_VAXT_MS + 270 * 1000 });
+      return tam;
     } catch (e) {
       xetalar.push(e.message);
       if (e.name === "TimeoutError") ai.modelFasilesiYaz(model, 3 * 60 * 1000);
